@@ -429,8 +429,13 @@ lance quelques fois par semaine.
 1. Ouvrez `koboimp/updates.py` et renseignez l'adresse du manifeste :
 
    ```python
-   DEFAULT_UPDATE_URL = "https://api.github.com/repos/Adnan23803/kobo_importer/releases/latest"
+   DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/Adnan23803/kobo_importer/main/derniere_version.json"
    ```
+
+   C'est la valeur livree pour ce depot. L'API GitHub
+   (`https://api.github.com/repos/Adnan23803/kobo_importer/releases/latest`)
+   fonctionne aussi, mais elle est limitee a 60 requetes par heure et par
+   adresse IP en acces anonyme.
 
    Cette adresse est **inscrite dans l'executable**. Sans elle, rien ne serait
    verifie : le reglage des parametres avances vit dans `%LOCALAPPDATA%`, qu'une

@@ -40,7 +40,16 @@ CHECK_TIMEOUT = 10
 #   DEFAULT_UPDATE_URL = "https://api.github.com/repos/MonCompte/kobo-importer/releases/latest"
 # ou, pour ne pas dependre du quota de l'API GitHub :
 #   DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/MonCompte/kobo-importer/main/derniere_version.json"
-DEFAULT_UPDATE_URL = "https://api.github.com/repos/Adnan23803/kobo_importer/releases/latest"
+# Source retenue : le manifeste versionne du depot, plutot que l'API GitHub.
+# Deux raisons concretes :
+#   - l'API anonyme est limitee a 60 requetes par heure et par adresse IP ; sur
+#     un site ou plusieurs postes partagent une meme sortie Internet, la
+#     verification echouerait par intermittence sans raison visible ;
+#   - le manifeste repond des maintenant, sans dependre de l'existence d'une
+#     release publiee.
+# Pour revenir a l'API GitHub, remplacer par :
+#   "https://api.github.com/repos/Adnan23803/kobo_importer/releases/latest"
+DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/Adnan23803/kobo_importer/main/derniere_version.json"
 
 _VERSION_PART = re.compile(r"\d+")
 
