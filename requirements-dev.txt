@@ -1,0 +1,4 @@
+# Outils necessaires uniquement pour construire l'executable (point 27).
+# PyInstaller n'a rien a faire dans les dependances d'execution.
+-r requirements.txt
+pyinstaller==6.19.0

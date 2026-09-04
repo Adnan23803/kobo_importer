@@ -1,0 +1,48 @@
+# --- Environnement Python -------------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- Produits de construction ---------------------------------------------
+# Reconstruits par build_exe.bat ; l'installeur se distribue par les releases
+# GitHub, pas par le depot (31 Mo par version).
+build/
+dist/
+installeur/
+*.manifest
+
+# NB : KoboImporter.spec et version_info.txt sont ecrits a la main et font
+# partie du projet. Ils ne doivent PAS etre ignores, malgre l'habitude de
+# mettre *.spec dans un .gitignore Python.
+
+# --- Donnees utilisateur ---------------------------------------------------
+# Elles vivent normalement dans %LOCALAPPDATA%\KoboImporter (point 22). Ces
+# regles sont un filet de securite si l'application est lancee depuis les
+# sources avec une ancienne configuration a cote : config.json contient le
+# jeton d'acces KoboToolbox.
+config.json
+profiles.json
+profiles.json.corrompu
+registry.db
+registry.db-wal
+registry.db-shm
+journal_import.csv
+xml_echecs/
+rapports/
+*.log
+
+# --- Fichiers de travail ---------------------------------------------------
+~$*.xlsx
+~$*.xls
+*.tmp
+
+# --- Editeurs et systeme ---------------------------------------------------
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
