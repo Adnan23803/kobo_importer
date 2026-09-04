@@ -1,0 +1,6 @@
+{
+  "_commentaire": "Manifeste de version lu par Kobo Importer. Publiez ce fichier a une adresse fixe (par exemple a la racine de votre depot GitHub) et inscrivez cette adresse dans updates.DEFAULT_UPDATE_URL avant de construire l'executable (deja fait pour ce depot). Mettez a jour 'version', 'url' et 'notes' a chaque publication. Les cles commencant par _ sont ignorees.",
+  "version": "3.1.0",
+  "url": "https://github.com/Adnan23803/kobo_importer/releases/latest",
+  "notes": "Diagnostic integre, correspondance manuelle des colonnes, lecture CSV, profils de configuration, contraintes XLSForm verifiees hors ligne, historique des imports, mode ligne de commande."
+}

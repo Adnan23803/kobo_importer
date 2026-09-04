@@ -1,0 +1,13 @@
+# Normalise les fins de ligne : le depot stocke en LF, la copie de travail
+# Windows recoit du CRLF. Evite qu'un fichier apparaisse entierement modifie
+# selon le poste qui le committe.
+* text=auto
+
+# Ces fichiers sont interpretes par des outils Windows qui exigent du CRLF.
+*.bat text eol=crlf
+*.iss text eol=crlf
+
+# Binaires : jamais de conversion.
+*.png binary
+*.ico binary
+*.xlsx binary
