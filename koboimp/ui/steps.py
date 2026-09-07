@@ -191,8 +191,8 @@ class ConnectionStep(Step):
             return client.test_connection(self.session.config.get("asset_uid", ""))
 
         def done(outcome):
-            ok, message = outcome
-            self._show_result(ok, message)
+            ok, message, tone = outcome
+            self._show_result(ok, message, tone)
             self.test_button.configure(state="normal", text="Tester la connexion")
             if ok:
                 self.session.connection_ok = True
@@ -204,15 +204,28 @@ class ConnectionStep(Step):
 
         self.app.run_async(work, done, failed)
 
-    def _show_result(self, ok, message):
-        self.result_badge.update_tone(
-            "Connexion etablie" if ok else "Echec", "success" if ok else "error"
-        )
-        self.result_label.configure(
-            text=message, text_color=theme.SUCCESS if ok else theme.DANGER
-        )
-        self.app.log(f"Test de connexion : {'OK' if ok else 'echec'} - {message}",
-                     "success" if ok else "error")
+    def _show_result(self, ok, message, tone="success"):
+        """Trois etats, pas deux : une reserve n'est pas un echec.
+
+        Un formulaire memorise devenu inaccessible, ou non deploye, n'empeche
+        pas de continuer : l'afficher en rouge laissait croire a un probleme de
+        jeton alors que l'etape suivante fonctionnait parfaitement.
+        """
+        if not ok:
+            tone = "error"
+        libelles = {
+            "success": "Connexion etablie",
+            "warning": "Connexion etablie, avec une reserve",
+            "error": "Echec",
+        }
+        couleurs = {
+            "success": theme.SUCCESS,
+            "warning": theme.WARNING,
+            "error": theme.DANGER,
+        }
+        self.result_badge.update_tone(libelles.get(tone, libelles["success"]), tone)
+        self.result_label.configure(text=message, text_color=couleurs.get(tone, theme.SUCCESS))
+        self.app.log(f"Test de connexion : {tone} - {message}", tone)
 
     def can_advance(self):
         self.collect()

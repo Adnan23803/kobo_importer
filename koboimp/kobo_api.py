@@ -345,13 +345,20 @@ class KoboClient:
     # -- test de connexion -------------------------------------------------
 
     def test_connection(self, asset_uid=""):
-        """Retourne (succes, message). Verifie le compte puis le formulaire."""
+        """Verifie le compte, puis a titre indicatif le formulaire memorise.
+
+        Retourne (succes, message, ton) ou `ton` vaut "success", "warning" ou
+        "error". Le distinguo compte : un formulaire memorise devenu
+        inaccessible (supprime, renomme, appartenant a un autre compte) ne dit
+        rien de la validite de la connexion. Le signaler comme un echec faisait
+        croire a un mauvais jeton alors que l'etape suivante fonctionnait.
+        """
         if not self.token:
-            return False, "Aucun token API renseigne."
+            return False, "Aucun token API renseigne.", "error"
         try:
             payload = self._get_json(f"{self.kpi_base_url}/api/v2/assets.json?limit=1")
         except KoboError as exc:
-            return False, str(exc)
+            return False, str(exc), "error"
 
         count = payload.get("count", 0) if isinstance(payload, dict) else 0
         message = f"Connexion reussie. {count} formulaire(s) accessible(s) sur ce compte."
@@ -359,14 +366,20 @@ class KoboClient:
         if asset_uid:
             try:
                 asset = self.get_asset(asset_uid)
-            except KoboError as exc:
-                return False, f"Compte valide mais formulaire inaccessible :\n{exc}"
+            except KoboError:
+                return True, message + (
+                    "\n\nLe formulaire retenu lors d'un import precedent n'est plus "
+                    "accessible avec ce compte. Choisissez-en un a l'etape suivante ; "
+                    "la connexion, elle, fonctionne."
+                ), "warning"
             if not (asset.get("has_deployment") and asset.get("deployment__active")):
-                return True, message + "\n\nAttention : ce formulaire n'est pas deploye. " \
-                                       "Les envois seront refuses tant qu'il ne l'est pas."
+                return True, message + (
+                    "\n\nAttention : ce formulaire n'est pas deploye. "
+                    "Les envois seront refuses tant qu'il ne l'est pas."
+                ), "warning"
             message += f"\nFormulaire « {asset.get('name')} » accessible et deploye."
 
-        return True, message
+        return True, message, "success"
 
     # -- points 4 et 20 : envoi --------------------------------------------
 
