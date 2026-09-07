@@ -35,6 +35,9 @@ RESERVED_COLUMNS = {
     "submitted", "_id", "_uuid", "_submission_time", "_validation_status",
     "_status", "_index", "meta", "formhub",
     "_ligne_excel", "_motif",
+    # Liaison feuille principale <-> feuille de repetition : structure, pas donnee.
+    "_parent_index", "parent_index", "_parent_id", "parent_id",
+    "_parent_table_name", "_submission__id", "_submission__uuid",
 }
 
 
@@ -316,12 +319,56 @@ def new_instance_id():
     return f"uuid:{uuid.uuid4()}"
 
 
-def build_submission_xml(pairs, root_name, form_version, instance_id=None, formhub_uuid=None):
+def _ensure_group_chain(root, segments, cache):
+    """Cree (ou reutilise) les elements de groupe menant a `segments`.
+
+    Les groupes ordinaires sont partages : deux questions du meme groupe
+    doivent atterrir dans un unique element parent, pas dans deux.
+    """
+    parent = root
+    for depth in range(len(segments)):
+        key = tuple(segments[: depth + 1])
+        node = cache.get(key)
+        if node is None:
+            node = ET.SubElement(parent, segments[depth])
+            cache[key] = node
+        parent = node
+    return parent
+
+
+def _fill_element(container, pairs):
+    """Ecrit des paires (chemin relatif, texte) dans un element donne."""
+    local_cache = {(): container}
+    for path, text in pairs:
+        if text is None or text == "":
+            continue
+        segments = split_path(path)
+        if not segments:
+            continue
+        parent = _ensure_group_chain(container, segments[:-1], local_cache) \
+            if len(segments) > 1 else container
+        ET.SubElement(parent, segments[-1]).text = text
+
+
+def build_submission_xml(pairs, root_name, form_version, instance_id=None,
+                         formhub_uuid=None, repeats=None):
     """Assemble la soumission.
 
     pairs        : sequence de (chemin, texte) deja mis en forme, sans valeur vide
     root_name    : UID du formulaire (element racine et attribut id)
     instance_id  : identifiant stable de la ligne, cle de la deduplication Kobo
+    repeats      : sequence de (chemin_du_groupe_repete, [instances]), chaque
+                   instance etant une liste de (chemin_relatif, texte).
+
+    Une repetition produit autant d'elements freres que d'instances :
+
+        <membres><prenom>Ali</prenom></membres>
+        <membres><prenom>Fati</prenom></membres>
+
+    contrairement a un groupe ordinaire, qui n'apparait qu'une fois. C'est
+    precisement cette difference qui interdit de representer une repetition
+    dans un tableau plat, et impose une feuille par groupe repete.
+
     Retourne (octets_xml, instance_id).
     """
     root_name = str(root_name or "").strip()
@@ -343,17 +390,23 @@ def build_submission_xml(pairs, root_name, form_version, instance_id=None, formh
         segments = split_path(path)
         if not segments:
             continue
-
-        parent = root
-        for depth in range(len(segments) - 1):
-            key = tuple(segments[: depth + 1])
-            node = groups.get(key)
-            if node is None:
-                node = ET.SubElement(parent, segments[depth])
-                groups[key] = node
-            parent = node
-
+        parent = _ensure_group_chain(root, segments[:-1], groups) \
+            if len(segments) > 1 else root
         ET.SubElement(parent, segments[-1]).text = text
+
+    for repeat_path, instances in (repeats or []):
+        segments = split_path(repeat_path)
+        if not segments or not instances:
+            continue
+        # Les groupes qui contiennent la repetition sont partages ; seul
+        # l'element de repetition lui-meme est recree a chaque instance.
+        container = _ensure_group_chain(root, segments[:-1], groups) \
+            if len(segments) > 1 else root
+        for instance_pairs in instances:
+            if not instance_pairs:
+                continue
+            element = ET.SubElement(container, segments[-1])
+            _fill_element(element, instance_pairs)
 
     if form_version:
         ET.SubElement(root, "__version__").text = str(form_version).strip()

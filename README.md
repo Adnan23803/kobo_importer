@@ -1,4 +1,4 @@
-# Kobo Importer 3.1
+# Kobo Importer 3.2
 
 Application Windows qui importe un fichier **Excel ou CSV** dans un formulaire KoboToolbox.
 
@@ -18,6 +18,7 @@ dans un classeur corrigeable et reimportable tel quel.
 - [Reprise et doublons](#reprise-et-doublons)
 - [Pour le developpeur](#pour-le-developpeur)
 - [Construire l'executable](#construire-lexecutable)
+- [Groupes repetes](#groupes-repetes)
 - [Diagnostic](#diagnostic)
 - [Correspondance des colonnes](#correspondance-des-colonnes)
 - [Profils de configuration](#profils-de-configuration)
@@ -216,6 +217,7 @@ koboimp/
 ├── excel.py                lecture, modele, rapports Excel
 ├── registry.py             historique des lignes envoyees + correspondances (SQLite)
 ├── constraints.py          interpretation des contraintes XLSForm
+├── repeats.py              groupes repetes : rattachement parent - enfant
 ├── engine.py               moteur d'import
 ├── profiles.py             configurations nommees
 ├── diagnostics.py          controle installation, reseau, compte, adresses
@@ -286,6 +288,85 @@ positifs antivirus, bloquants sur un poste d'organisation.
 Pour produire l'installeur : installez [Inno Setup 6.3 ou plus recent](https://jrsoftware.org/isdl.php),
 ouvrez `installer.iss` et compilez. Le resultat arrive dans `installeur\`.
 L'installation se fait pour l'utilisateur courant, sans droits administrateur.
+
+---
+
+## Groupes repetes
+
+Un formulaire Kobo peut contenir un `begin_repeat` : une serie de questions
+posee autant de fois qu'il y a d'elements. Les membres d'un menage, les
+parcelles d'une exploitation, les enfants d'une famille.
+
+Un tableau plat ne peut pas l'exprimer : trois membres tiendraient dans une
+seule cellule. La solution retenue est **une feuille par repetition**.
+
+### La convention
+
+Elle est celle des **exports Excel de KoboToolbox eux-memes** :
+
+| Feuille | Role | Colonne de liaison |
+|---|---|---|
+| `Donnees` | une ligne par soumission | `_index` : 1, 2, 3... |
+| `membres` | une ligne par repetition | `_parent_index` : le `_index` du menage |
+
+```
+Feuille « Donnees »                  Feuille « membres »
+_index  nom_chef   village           _parent_index  prenom   age  sexe
+   1    Issa       Say                     1        Ali       12   m
+   2    Fati       Torodi                  1        Fati       9   f
+   3    Ali        Kollo                   1        Zara      30   f
+                                           3        Moussa    41   m
+```
+
+Le menage 1 part avec trois membres, le menage 2 avec aucun, le menage 3 avec
+un. Le nom de la feuille doit correspondre au nom du groupe repete dans le
+formulaire.
+
+Choisir la convention de Kobo plutot qu'une invention maison a une consequence
+pratique : **un export Kobo corrige dans Excel se reimporte tel quel**, sans
+retouche de structure.
+
+Si la feuille principale n'a pas de colonne `_index`, le numero de ligne
+(1, 2, 3...) en tient lieu — ce qui correspond exactement a ce que Kobo y met.
+
+### Le modele genere s'en charge
+
+« Telecharger le modele Excel » produit directement le classeur complet :
+la feuille `Donnees` avec sa colonne `_index` deja numerotee, une feuille par
+groupe repete avec sa colonne `_parent_index`, les listes deroulantes, et une
+notice qui explique le rattachement avec un exemple.
+
+### Ce qui est verifie avant l'envoi
+
+- les colonnes de chaque feuille enfant sont confrontees aux questions de la
+  repetition, exactement comme celles de la feuille principale ;
+- les lignes enfants dont le `_parent_index` ne designe aucune ligne principale
+  sont comptees et signalees : elles ne partiront pas ;
+- une feuille sans colonne de liaison est annoncee et entierement ignoree —
+  rattacher au hasard produirait des donnees fausses, ce qui est pire que de
+  ne rien envoyer ;
+- une feuille du classeur qui ne correspond a aucun groupe repete (notice,
+  calculs, listes) est ignoree en silence.
+
+L'ecran de verification affiche le compte : *« membres : 4 repetition(s)
+rattachee(s), 1 orpheline — 3 colonne(s) reconnue(s) »*.
+
+### Reprise apres correction
+
+La cle qui identifie une ligne integre l'empreinte de ses repetitions. Corriger
+l'age d'un seul membre suffit donc a faire repartir la soumission du menage
+correspondant, alors que la ligne principale n'a pas bouge. Sans cela, la
+correction n'aurait jamais ete envoyee.
+
+Les autres lignes, elles, restent reconnues comme deja envoyees et ne repartent
+pas.
+
+### Limite : les repetitions imbriquees
+
+Une repetition placee dans une autre repetition (des personnes dans des menages,
+eux-memes repetes) demanderait un troisieme niveau de rattachement. Elle est
+detectee, annoncee explicitement, et n'est pas importee. Les repetitions de
+premier niveau, elles, le sont toutes.
 
 ---
 
@@ -524,6 +605,27 @@ lendemain. Dans ce cas de figure :
 
 ---
 
+## Ce qui a change en version 3.2
+
+### Groupes repetes importables
+
+Le manque le plus visible de la version precedente est comble : les questions
+d'un `begin_repeat` s'importent depuis une feuille dediee, rattachee a la
+feuille principale par `_parent_index`, selon la convention des exports Kobo.
+Le modele Excel genere fournit ces feuilles pretes a remplir, et la cle de
+reprise integre les repetitions, si bien que corriger une seule ligne enfant
+fait bien repartir la soumission concernee.
+
+### Test de connexion moins alarmant
+
+Le test signalait « Echec » en rouge lorsque le formulaire retenu lors d'un
+import precedent avait ete supprime, alors que le compte et le jeton etaient
+parfaitement valides — l'etape suivante listait d'ailleurs normalement les
+formulaires. Il rend desormais trois etats : succes, reserve, echec. Un
+formulaire disparu ou non deploye releve de la reserve, pas de l'echec.
+
+---
+
 ## Ce qui a change en version 3.1
 
 ### Verifier avant d'accuser ses donnees
@@ -655,8 +757,10 @@ Vingt-sept corrections et ameliorations, regroupees par nature.
 
 ## Limites connues
 
-- **Groupes repetes** : un tableau plat ne peut pas les exprimer. Les questions
-  concernees sont signalees et ignorees.
+- **Repetitions imbriquees** : une repetition dans une repetition demanderait
+  un troisieme niveau de rattachement. Elle est detectee et signalee, mais non
+  importee. Les repetitions de premier niveau le sont (voir
+  [Groupes repetes](#groupes-repetes)).
 - **Pieces jointes** (photo, audio, fichier) : non transmises par l'import Excel.
   Les colonnes correspondantes sont signalees.
 - **Formulaire non deploye** : les envois sont refuses par le serveur.

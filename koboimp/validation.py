@@ -189,11 +189,14 @@ def map_columns(columns, form_schema, overrides=None):
             ))
             continue
 
-        if question.in_repeat:
+        # Une question de repetition n'a rien a faire dans la feuille
+        # principale ; elle est au contraire attendue dans la feuille dediee.
+        if question.in_repeat and not getattr(form_schema, "is_repeat_scope", False):
             statuses.append(ColumnStatus(
                 column=column, status=COL_REPEAT, index=position,
                 path=question.path, question=question,
-                message="Question dans un groupe repete : non pris en charge par un tableau plat.",
+                message="Question d'un groupe repete : renseignez-la dans la feuille "
+                        f"« {question.path.split('/')[0]} » du classeur.",
             ))
             continue
 
@@ -229,11 +232,11 @@ def _apply_override(column, position, target_path, form_schema):
             path=question.path, question=question,
             message="Champ de type fichier : l import ne transporte pas de piece jointe.",
         )
-    if question.in_repeat:
+    if question.in_repeat and not getattr(form_schema, "is_repeat_scope", False):
         return ColumnStatus(
             column=column, status=COL_REPEAT, index=position, manual=True,
             path=question.path, question=question,
-            message="Question dans un groupe repete : non pris en charge.",
+            message="Question d'un groupe repete : a renseigner dans sa propre feuille.",
         )
     return ColumnStatus(
         column=column, status=COL_OK, index=position, manual=True,

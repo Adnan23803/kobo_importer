@@ -77,22 +77,30 @@ def _now():
     return datetime.now().isoformat(timespec="seconds")
 
 
-def compute_row_keys(dataframe, source_id):
+def compute_row_keys(dataframe, source_id, extra=None):
     """Cle stable par ligne : empreinte du contenu, pas de la position.
 
     Deux lignes strictement identiques dans le meme fichier sont distinguees par
     un compteur d'occurrence : elles restent deux soumissions differentes, tout
     en gardant une cle insensible a un tri ou a une insertion de ligne.
+
+    `extra` ajoute, pour chaque ligne, une empreinte de ce qui lui est rattache
+    sans figurer dans le tableau : les repetitions. Sans cela, corriger l'age
+    d'un membre du menage laisserait la ligne principale inchangee, donc tenue
+    pour deja envoyee, et la correction ne partirait jamais.
     """
     occurrences = {}
     keys = []
-    for values in dataframe.itertuples(index=False, name=None):
+    supplement = list(extra or [])
+    for index, values in enumerate(dataframe.itertuples(index=False, name=None)):
         parts = []
         for value in values:
             if value is None or value != value:  # None / NaN / NaT
                 parts.append("")
             else:
                 parts.append(str(value))
+        if index < len(supplement):
+            parts.append(str(supplement[index]))
         digest = hashlib.sha1(  # noqa: S324 - identification, pas de securite
             f"{source_id}\x1e{chr(31).join(parts)}".encode("utf-8", "replace")
         ).hexdigest()

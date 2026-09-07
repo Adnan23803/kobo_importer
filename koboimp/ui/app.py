@@ -26,7 +26,9 @@ from PIL import Image
 from .. import __version__
 from .. import config as config_mod
 from .. import engine as engine_mod
-from .. import kobo_api, paths, profiles, registry as registry_mod, updates
+from .. import kobo_api, paths, profiles, registry as registry_mod
+from .. import repeats as repeats_mod
+from .. import updates
 from . import theme
 from .dialogs import DiagnosticDialog, HistoryDialog, ProfileDialog
 from .steps import APP_TITLE, ConnectionStep, FileStep, FormStep, ImportStep
@@ -54,6 +56,8 @@ class Session:
         self.column_statuses = []
         self.validation_report = None
         self.column_overrides = {}      # point 3 : colonne -> chemin de question
+        self.repeat_data = []           # feuilles de repetition rattachees
+        self.repeat_warnings = []
 
         self._client = None
         self._client_signature = None
@@ -98,7 +102,8 @@ class Session:
         # qu'il change (point 3).
         self.column_overrides = self.registry.load_mapping(form_schema.uid)
 
-    def set_data(self, dataframe, path, sheet, signature, column_statuses, report):
+    def set_data(self, dataframe, path, sheet, signature, column_statuses, report,
+                 repeat_data=None, repeat_warnings=None):
         self.dataframe = dataframe
         self.source_path = path
         self.source_name = os.path.basename(path)
@@ -108,12 +113,16 @@ class Session:
         self.source_id = f"{signature}:{self.schema.uid if self.schema else ''}:{self.sheet}"
         self.column_statuses = column_statuses
         self.validation_report = report
+        self.repeat_data = list(repeat_data or [])
+        self.repeat_warnings = list(repeat_warnings or [])
 
     def reset_validation(self):
         self.dataframe = None
         self.column_statuses = []
         self.validation_report = None
         self.source_id = ""
+        self.repeat_data = []
+        self.repeat_warnings = []
 
     def set_overrides(self, overrides):
         """Enregistre la correspondance manuelle pour le formulaire courant."""
@@ -935,6 +944,7 @@ class App(ctk.CTk):
                 log_callback=self.log,
                 stop_event=self._stop_event,
                 validation_report=session.validation_report,
+                repeat_data=session.repeat_data,
             )
             return worker.run()
 

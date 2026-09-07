@@ -10,7 +10,9 @@ Points couverts :
        types documentes, listes deroulantes pour les questions a choix) ;
   11 - rapport d'erreurs au format Excel, contenant les donnees d'origine et un
        motif en francais, directement reimportable apres correction ;
-  14 - choix de la feuille et message clair quand le fichier est ouvert dans Excel.
+  14 - choix de la feuille et message clair quand le fichier est ouvert dans Excel ;
+   4 - groupes repetes : une feuille par repetition, rattachee a la feuille
+       principale par _parent_index, selon la convention des exports Kobo.
 """
 
 import csv
@@ -45,6 +47,8 @@ CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
 _HEADER_FILL = PatternFill("solid", fgColor="1F4E79")
 _REQUIRED_FILL = PatternFill("solid", fgColor="B45309")
 _TITLE_FILL = PatternFill("solid", fgColor="E7EDF3")
+# Colonnes de structure (_index, _parent_index) : ni donnee, ni question.
+_LINK_FILL = PatternFill("solid", fgColor="475569")
 _HEADER_FONT = Font(color="FFFFFF", bold=True)
 
 
@@ -215,6 +219,43 @@ def _trim_trailing_blank_rows(frame):
     return frame.iloc[: int(non_blank[-1]) + 1].reset_index(drop=True)
 
 
+def read_workbook(path, main_sheet=None, form_schema=None):
+    """Lit la feuille principale et les feuilles de repetition reconnues.
+
+    Retourne (frame_principale, feuille_utilisee, {nom_de_feuille: frame}).
+
+    Une feuille qui ne correspond a aucun groupe repete du formulaire est
+    ignoree en silence : un classeur contient souvent une notice, une feuille de
+    listes ou des calculs intermediaires, qui n'ont rien a faire dans l'envoi.
+    """
+    from . import repeats as repeats_mod
+
+    frame, used = read_table(path, main_sheet)
+    children = {}
+
+    if form_schema is None or not getattr(form_schema, "importable_repeats", None):
+        return frame, used, children
+    if is_csv(path):
+        # Un CSV ne porte qu'une table : les repetitions exigent un classeur.
+        return frame, used, children
+
+    try:
+        sheets = list_sheets(path)
+    except ExcelError:
+        return frame, used, children
+
+    matched, _ignored = repeats_mod.match_sheets(sheets, form_schema, used)
+    for sheet, group in matched:
+        try:
+            child, _ = read_table(path, sheet)
+        except ExcelError:
+            continue
+        if child is not None and len(child.columns):
+            children[sheet] = child
+
+    return frame, used, children
+
+
 def file_signature(path):
     """Empreinte du contenu : identifie le fichier dans le registre (point 21).
 
@@ -251,6 +292,102 @@ def _type_help(question):
     return mapping.get(question.type, question.type)
 
 
+class _ListWriter:
+    """Ecrit les listes de choix sur la feuille masquee, une seule fois chacune.
+
+    Une meme liste sert souvent a plusieurs questions, dans la feuille
+    principale comme dans les feuilles de repetition : la reecrire a chaque fois
+    gonflerait le classeur sans rien apporter.
+    """
+
+    def __init__(self, sheet):
+        self.sheet = sheet
+        self.column = 0
+        self.references = {}
+
+    def reference(self, question):
+        key = question.list_name or question.name
+        if key in self.references:
+            return self.references[key]
+
+        self.column += 1
+        letter = get_column_letter(self.column)
+        self.sheet.cell(row=1, column=self.column, value=key)
+        for offset, choice in enumerate(question.choices, start=2):
+            self.sheet.cell(row=offset, column=self.column, value=choice.name)
+
+        reference = f"'{LIST_SHEET}'!${letter}$2:${letter}${len(question.choices) + 1}"
+        self.references[key] = reference
+        return reference
+
+
+def _apply_dropdowns(sheet, questions, writer, first_column):
+    """Pose une liste deroulante sur chaque colonne select_one.
+
+    select_multiple en est exclu : une liste fermee empecherait de saisir
+    plusieurs choix dans la meme cellule, qui est precisement l'usage attendu.
+    """
+    for offset, question in enumerate(questions):
+        if question.type != "select_one" or not question.choices:
+            continue
+        validation = DataValidation(
+            type="list", formula1=writer.reference(question), allow_blank=True
+        )
+        validation.error = "Choisissez une valeur dans la liste."
+        validation.errorTitle = "Valeur non autorisee"
+        sheet.add_data_validation(validation)
+        letter = get_column_letter(first_column + offset)
+        validation.add(f"{letter}2:{letter}{TEMPLATE_ROWS}")
+
+
+def _write_repeat_sheet(workbook, group, writer, repeats_mod):
+    """Feuille dediee a un groupe repete.
+
+    Premiere colonne : `_parent_index`, qui designe la ligne de la feuille
+    principale a laquelle la repetition se rattache. Une ligne par repetition ;
+    trois membres d'un meme menage occupent trois lignes portant le meme
+    `_parent_index`.
+    """
+    sheet = workbook.create_sheet(group.sheet_name())
+    questions = [
+        question for question in group.importable
+        if not question.is_metadata and question.type != "calculate"
+    ]
+
+    cell = sheet.cell(row=1, column=1, value=repeats_mod.CHILD_KEY)
+    cell.font = _HEADER_FONT
+    cell.fill = _LINK_FILL
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.comment = Comment(
+        f"Numero de la ligne de la feuille « {DATA_SHEET} » a laquelle cette "
+        "repetition appartient.\n\n"
+        "Repetez le meme numero sur autant de lignes que necessaire : trois "
+        "membres du menage 1 occupent trois lignes portant 1.\n\n"
+        "Cette colonne n'est pas envoyee : elle ne sert qu'au rattachement.",
+        "Kobo Importer",
+    )
+    sheet.column_dimensions["A"].width = 16
+
+    for offset, question in enumerate(questions):
+        position = offset + 2
+        cell = sheet.cell(row=1, column=position, value=group.relative(question.path))
+        cell.font = _HEADER_FONT
+        cell.fill = _REQUIRED_FILL if question.required else _HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        note = f"{question.display_label()}\n\nType : {_type_help(question)}"
+        if question.required:
+            note += "\nReponse obligatoire"
+        cell.comment = Comment(note, "Kobo Importer")
+        sheet.column_dimensions[get_column_letter(position)].width = min(
+            42, max(14, len(question.name) + 6)
+        )
+
+    _apply_dropdowns(sheet, questions, writer, first_column=2)
+    sheet.freeze_panes = "B2"
+    return sheet
+
+
 def build_template(form_schema, target_path):
     """Ecrit un classeur pret a remplir pour ce formulaire."""
     questions = [
@@ -260,6 +397,13 @@ def build_template(form_schema, target_path):
     if not questions:
         raise ExcelError("Ce formulaire ne contient aucune question importable.")
 
+    from . import repeats as repeats_mod
+
+    groupes_repetes = [
+        group for group in getattr(form_schema, "importable_repeats", [])
+        if group.importable
+    ]
+
     workbook = Workbook()
     data_sheet = workbook.active
     data_sheet.title = DATA_SHEET
@@ -267,8 +411,28 @@ def build_template(form_schema, target_path):
     lists = workbook.create_sheet(LIST_SHEET)
 
     # --- feuille de saisie ------------------------------------------------
-    for index, question in enumerate(questions, start=1):
-        cell = data_sheet.cell(row=1, column=index, value=question.path)
+    colonne = 1
+
+    # Une colonne _index n'est necessaire que s'il existe des repetitions a
+    # rattacher ; sinon elle encombrerait le classeur sans rien apporter.
+    if groupes_repetes:
+        cell = data_sheet.cell(row=1, column=colonne, value=repeats_mod.PARENT_KEY)
+        cell.font = _HEADER_FONT
+        cell.fill = _LINK_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.comment = Comment(
+            "Numero de la ligne, a reporter dans la colonne « "
+            f"{repeats_mod.CHILD_KEY} » des feuilles de repetition.\n\n"
+            "Numerotez simplement 1, 2, 3... Cette colonne n'est pas envoyee.",
+            "Kobo Importer",
+        )
+        data_sheet.column_dimensions[get_column_letter(colonne)].width = 10
+        for ligne in range(2, TEMPLATE_ROWS + 1):
+            data_sheet.cell(row=ligne, column=colonne, value=ligne - 1)
+        colonne += 1
+
+    for question in questions:
+        cell = data_sheet.cell(row=1, column=colonne, value=question.path)
         cell.font = _HEADER_FONT
         cell.fill = _REQUIRED_FILL if question.required else _HEADER_FILL
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -279,37 +443,19 @@ def build_template(form_schema, target_path):
         cell.comment = Comment(note, "Kobo Importer")
 
         width = min(42, max(14, len(question.path) + 4))
-        data_sheet.column_dimensions[get_column_letter(index)].width = width
+        data_sheet.column_dimensions[get_column_letter(colonne)].width = width
+        colonne += 1
 
     data_sheet.freeze_panes = "A2"
 
     # --- listes de choix + validations ------------------------------------
-    list_column = 0
-    written_lists = {}
-    for index, question in enumerate(questions, start=1):
-        if not question.is_select or not question.choices:
-            continue
+    ecrivain = _ListWriter(lists)
+    _apply_dropdowns(data_sheet, questions, ecrivain,
+                     first_column=2 if groupes_repetes else 1)
 
-        if question.list_name in written_lists:
-            reference = written_lists[question.list_name]
-        else:
-            list_column += 1
-            letter = get_column_letter(list_column)
-            lists.cell(row=1, column=list_column, value=question.list_name or question.name)
-            for offset, choice in enumerate(question.choices, start=2):
-                lists.cell(row=offset, column=list_column, value=choice.name)
-            reference = f"'{LIST_SHEET}'!${letter}$2:${letter}${len(question.choices) + 1}"
-            written_lists[question.list_name or question.name] = reference
-
-        if question.type == "select_one":
-            # select_multiple accepte plusieurs valeurs : une liste fermee
-            # empecherait la saisie, on se contente de documenter les choix.
-            validation = DataValidation(type="list", formula1=reference, allow_blank=True)
-            validation.error = "Choisissez une valeur dans la liste."
-            validation.errorTitle = "Valeur non autorisee"
-            data_sheet.add_data_validation(validation)
-            letter = get_column_letter(index)
-            validation.add(f"{letter}2:{letter}{TEMPLATE_ROWS}")
+    # --- une feuille par groupe repete ------------------------------------
+    for group in groupes_repetes:
+        _write_repeat_sheet(workbook, group, ecrivain, repeats_mod)
 
     lists.sheet_state = "hidden"
 
@@ -329,13 +475,60 @@ def build_template(form_schema, target_path):
         cell.font = Font(bold=True)
         cell.fill = _TITLE_FILL
 
-    for offset, question in enumerate(questions, start=6):
+    ligne = 6
+    for question in questions:
         choices = ", ".join(choice.name for choice in question.choices) if question.choices else ""
-        notice.cell(row=offset, column=1, value=question.path)
-        notice.cell(row=offset, column=2, value=question.display_label())
-        notice.cell(row=offset, column=3, value=_type_help(question))
-        notice.cell(row=offset, column=4, value="Oui" if question.required else "")
-        notice.cell(row=offset, column=5, value=choices)
+        notice.cell(row=ligne, column=1, value=question.path)
+        notice.cell(row=ligne, column=2, value=question.display_label())
+        notice.cell(row=ligne, column=3, value=_type_help(question))
+        notice.cell(row=ligne, column=4, value="Oui" if question.required else "")
+        notice.cell(row=ligne, column=5, value=choices)
+        ligne += 1
+
+    # --- mode d'emploi des repetitions ------------------------------------
+    #
+    # La convention _index / _parent_index ne s'invente pas : sans explication,
+    # l'utilisateur remplirait la feuille sans rattacher ses lignes, et les
+    # repetitions seraient silencieusement perdues.
+    for group in groupes_repetes:
+        ligne += 2
+        titre_groupe = notice.cell(
+            row=ligne, column=1,
+            value=f"Feuille « {group.sheet_name()} » — {group.display_label()}",
+        )
+        titre_groupe.font = Font(bold=True, size=12)
+        ligne += 1
+        notice.cell(
+            row=ligne, column=1,
+            value=f"Une ligne par repetition. Reportez dans « {repeats_mod.CHILD_KEY} » "
+                  f"le numero « {repeats_mod.PARENT_KEY} » de la ligne concernee de la "
+                  f"feuille « {DATA_SHEET} ».",
+        )
+        ligne += 1
+        notice.cell(
+            row=ligne, column=1,
+            value="Exemple : trois membres du menage numero 1 occupent trois lignes "
+                  f"portant toutes 1 dans « {repeats_mod.CHILD_KEY} ». Un menage sans "
+                  "membre n'a simplement aucune ligne ici.",
+        )
+        ligne += 2
+
+        for column, label in enumerate(headers, start=1):
+            cell = notice.cell(row=ligne, column=column, value=label)
+            cell.font = Font(bold=True)
+            cell.fill = _TITLE_FILL
+        ligne += 1
+
+        for question in group.importable:
+            if question.is_metadata or question.type == "calculate":
+                continue
+            choices = ", ".join(c.name for c in question.choices) if question.choices else ""
+            notice.cell(row=ligne, column=1, value=group.relative(question.path))
+            notice.cell(row=ligne, column=2, value=question.display_label())
+            notice.cell(row=ligne, column=3, value=_type_help(question))
+            notice.cell(row=ligne, column=4, value="Oui" if question.required else "")
+            notice.cell(row=ligne, column=5, value=choices)
+            ligne += 1
 
     for column, width in enumerate((34, 46, 30, 12, 60), start=1):
         notice.column_dimensions[get_column_letter(column)].width = width

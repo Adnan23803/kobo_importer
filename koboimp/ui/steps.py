@@ -12,7 +12,9 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .. import config as config_mod
-from .. import excel, paths, validation
+from .. import excel, paths
+from .. import repeats as repeats_mod
+from .. import validation
 from . import theme
 from .widgets import Badge, Card, Journal, LabelledEntry, SummaryTiles
 
@@ -654,17 +656,23 @@ class FileStep(Step):
         overrides = dict(self.session.column_overrides or {})
 
         def work():
-            frame, used = excel.read_table(path, sheet)
+            # Le classeur entier est lu : la feuille principale et, s'il en
+            # existe, les feuilles de groupes repetes.
+            frame, used, child_frames = excel.read_workbook(path, sheet, form_schema)
             signature = excel.file_signature(path)
             # Point 3 : la correspondance enregistree pour ce formulaire prime
             # sur la reconnaissance par nom de colonne.
             statuses = validation.map_columns(frame.columns, form_schema, overrides)
             report = validation.validate_dataframe(frame, form_schema, overrides=overrides)
-            return frame, used, signature, statuses, report
+            repeat_data, repeat_warnings = repeats_mod.prepare(
+                frame, child_frames, form_schema, overrides
+            )
+            return frame, used, signature, statuses, report, repeat_data, repeat_warnings
 
         def done(outcome):
-            frame, used, signature, statuses, report = outcome
-            self.session.set_data(frame, path, used, signature, statuses, report)
+            frame, used, signature, statuses, report, repeat_data, repeat_warnings = outcome
+            self.session.set_data(frame, path, used, signature, statuses, report,
+                                  repeat_data, repeat_warnings)
             self.session.config["excel_file"] = path
             self.session.config["excel_sheet"] = used or ""
             self.app.save_config()
@@ -702,6 +710,8 @@ class FileStep(Step):
             tone = theme.SUCCESS
 
         lignes = [report.headline()]
+        lignes.extend(repeats_mod.summarize(self.session.repeat_data))
+        lignes.extend(self.session.repeat_warnings)
         lignes.extend(report.warnings)
         if report.truncated:
             lignes.append(

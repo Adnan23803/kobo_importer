@@ -86,7 +86,86 @@ class Question:
 
 
 @dataclass
+class RepeatGroup:
+    """Groupe repete : une question posee autant de fois qu'il y a d'elements.
+
+    Un tableau plat ne peut pas l'exprimer ; ces questions vivent donc dans une
+    feuille separee, chaque ligne etant une repetition rattachee a une ligne de
+    la feuille principale.
+    """
+
+    path: str
+    name: str
+    label: str = ""
+    questions: list = field(default_factory=list)
+    nested: bool = False        # repetition imbriquee dans une autre repetition
+
+    def display_label(self):
+        return self.label or self.name
+
+    @property
+    def required_paths(self):
+        return [q.path for q in self.questions if q.required and not q.is_metadata]
+
+    @property
+    def importable(self):
+        """Questions renseignables depuis une feuille : hors pieces jointes."""
+        return [q for q in self.questions if not q.is_attachment]
+
+    def relative(self, question_path):
+        """'menage/membres/prenom' -> 'prenom' (chemin dans la repetition)."""
+        prefix = self.path + "/"
+        text = str(question_path or "")
+        return text[len(prefix):] if text.startswith(prefix) else text
+
+    def sheet_name(self):
+        """Nom de feuille Excel : 31 caracteres maximum, sans separateur."""
+        base = self.name or self.path.replace("/", "_")
+        return base[:31]
+
+    # -- interface commune avec FormSchema ---------------------------------
+    #
+    # Un groupe repete expose deliberement les memes methodes qu'un formulaire
+    # (get, importable, has_repeats, has_attachments). La feuille enfant est
+    # alors verifiee par exactement le meme code que la feuille principale,
+    # au lieu d'une seconde implementation a maintenir en parallele.
+
+    def get(self, key):
+        """Retrouve une question par chemin complet, chemin relatif ou nom.
+
+        Un export Kobo nomme ses colonnes enfants par le nom court (« prenom »),
+        alors que le modele genere utilise le chemin complet : les deux doivent
+        etre reconnus.
+        """
+        needle = str(key or "").strip().lower()
+        if not needle:
+            return None
+        for question in self.questions:
+            if needle in (question.path.lower(),
+                          self.relative(question.path).lower(),
+                          question.name.lower()):
+                return question
+        return None
+
+    # Distingue le contexte de verification : dans une feuille de repetition,
+    # une question « dans une repetition » est normale, alors que la meme
+    # question dans la feuille principale n'a rien a y faire.
+    is_repeat_scope = True
+
+    @property
+    def has_repeats(self):
+        # Une repetition imbriquee est signalee sur le formulaire, pas ici.
+        return False
+
+    @property
+    def has_attachments(self):
+        return any(question.is_attachment for question in self.questions)
+
+
+@dataclass
 class FormSchema:
+    is_repeat_scope = False
+
     uid: str = ""
     title: str = ""
     version: str = ""
@@ -94,6 +173,7 @@ class FormSchema:
     deployed: bool = False
     questions: list = field(default_factory=list)
     repeat_groups: list = field(default_factory=list)
+    repeats: list = field(default_factory=list)     # RepeatGroup
 
     def __post_init__(self):
         self._by_path = {question.path: question for question in self.questions}
@@ -136,6 +216,22 @@ class FormSchema:
 
     def types_by_path(self):
         return {question.path: question.type for question in self.questions}
+
+    def repeat(self, key):
+        """Retrouve un groupe repete par chemin, nom ou nom de feuille."""
+        needle = str(key or "").strip().lower()
+        if not needle:
+            return None
+        for group in self.repeats:
+            if needle in (group.path.lower(), group.name.lower(),
+                          group.sheet_name().lower()):
+                return group
+        return None
+
+    @property
+    def importable_repeats(self):
+        """Repetitions qu'un classeur peut alimenter : les non imbriquees."""
+        return [group for group in self.repeats if not group.nested]
 
     @property
     def constrained_questions(self):
@@ -209,7 +305,9 @@ def parse_asset(asset):
 
     questions = []
     repeat_groups = []
-    stack = []          # chemins des groupes ouverts
+    repeats = []            # RepeatGroup, dans l'ordre du formulaire
+    repeat_stack = []       # RepeatGroup actuellement ouverts
+    stack = []              # noms des groupes ouverts
     repeat_depth = 0
 
     for row in content.get("survey") or []:
@@ -224,8 +322,18 @@ def parse_asset(asset):
             if name:
                 stack.append(name)
             if base_type in REPEAT_OPEN:
+                group = RepeatGroup(
+                    path="/".join(stack),
+                    name=name,
+                    label=_first_label(row.get("label")),
+                    # Une repetition dans une repetition ne se represente pas
+                    # par deux feuilles plates : on la signale sans l'importer.
+                    nested=repeat_depth > 0,
+                )
                 repeat_depth += 1
-                repeat_groups.append("/".join(stack))
+                repeats.append(group)
+                repeat_stack.append(group)
+                repeat_groups.append(group.path)
             continue
 
         if base_type in STRUCTURE_CLOSE:
@@ -233,6 +341,8 @@ def parse_asset(asset):
                 stack.pop()
             if base_type in {"end_repeat", "end repeat"} and repeat_depth > 0:
                 repeat_depth -= 1
+                if repeat_stack:
+                    repeat_stack.pop()
             continue
 
         if not name or not base_type or base_type in NON_SUBMITTED_TYPES:
@@ -242,7 +352,7 @@ def parse_asset(asset):
         group_path = "/".join(stack)
         path = f"{group_path}/{name}" if group_path else name
 
-        questions.append(Question(
+        question = Question(
             name=name,
             path=path,
             type=base_type,
@@ -259,7 +369,11 @@ def parse_asset(asset):
                 row.get("constraint"),
                 _first_label(row.get("constraint_message")),
             ),
-        ))
+        )
+        questions.append(question)
+        if repeat_stack:
+            # La repetition la plus profonde est celle qui porte la question.
+            repeat_stack[-1].questions.append(question)
 
     version = (
         asset.get("deployed_version_id")
@@ -275,6 +389,7 @@ def parse_asset(asset):
         deployed=bool(asset.get("has_deployment") and asset.get("deployment__active")),
         questions=questions,
         repeat_groups=repeat_groups,
+        repeats=repeats,
     )
 
 

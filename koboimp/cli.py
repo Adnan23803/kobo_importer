@@ -21,7 +21,9 @@ import threading
 from . import __version__
 from . import config as config_mod
 from . import diagnostics, engine as engine_mod, excel, kobo_api
-from . import paths, profiles, registry as registry_mod, updates, validation
+from . import paths, profiles, registry as registry_mod
+from . import repeats as repeats_mod
+from . import updates, validation
 
 EXIT_OK = 0
 EXIT_FAILURES = 1
@@ -138,7 +140,7 @@ def _prepare(args, config, reporter):
 
     reporter.write(f"Lecture de {os.path.basename(path)}...")
     try:
-        frame, sheet = excel.read_table(path, args.sheet)
+        frame, sheet, child_frames = excel.read_workbook(path, args.sheet, form_schema)
         signature = excel.file_signature(path)
     except excel.ExcelError as exc:
         reporter.write(str(exc))
@@ -157,7 +159,14 @@ def _prepare(args, config, reporter):
 
     statuses = validation.map_columns(frame.columns, form_schema, overrides)
     report = validation.validate_dataframe(frame, form_schema, overrides=overrides)
-    return client, form_schema, frame, statuses, report, signature, sheet
+
+    repeat_data, repeat_warnings = repeats_mod.prepare(frame, child_frames, form_schema)
+    for ligne in repeats_mod.summarize(repeat_data):
+        reporter.write(f"  repetition {ligne}")
+    for avertissement in repeat_warnings:
+        reporter.write(f"  ! {avertissement}")
+
+    return (client, form_schema, frame, statuses, report, signature, sheet, repeat_data)
 
 
 def _print_report(report, reporter, limit=25):
@@ -227,7 +236,8 @@ def command_check(args, reporter):
     if prepared is None:
         return EXIT_USAGE
 
-    _client, _schema, _frame, _statuses, report, _signature, _sheet = prepared
+    (_client, _schema, _frame, _statuses, report,
+     _signature, _sheet, _repeat_data) = prepared
     _print_report(report, reporter)
     if report.has_blocking_errors:
         return EXIT_FAILURES
@@ -250,7 +260,8 @@ def command_import(args, reporter):
     prepared = _prepare(args, config, reporter)
     if prepared is None:
         return EXIT_USAGE
-    client, form_schema, frame, statuses, report, signature, sheet = prepared
+    (client, form_schema, frame, statuses, report,
+     signature, sheet, repeat_data) = prepared
 
     _print_report(report, reporter, limit=10)
     if report.has_blocking_errors:
@@ -282,6 +293,7 @@ def command_import(args, reporter):
             ),
             stop_event=threading.Event(),
             validation_report=report,
+            repeat_data=repeat_data,
         )
         result = worker.run()
     except engine_mod.FormVersionChanged as exc:

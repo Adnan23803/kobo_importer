@@ -8,7 +8,9 @@ Points couverts :
   18 - les notifications vers l'interface sont regroupees et limitees en debit ;
   19 - envoi par lots et annulation effective des taches en attente ;
   21 - chaque ligne passe par le registre (instanceID stable, reprise fiable) ;
-  24 - la validation unitaire remplace le validate_row qui retournait toujours True.
+  24 - la validation unitaire remplace le validate_row qui retournait toujours True ;
+   4 - groupes repetes : chaque ligne principale emporte les lignes enfants qui
+       lui sont rattachees, transformees en elements repetes du XML.
 """
 
 import csv
@@ -18,7 +20,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from . import excel, kobo_api, registry as registry_mod, validation, xmlbuild
+from . import excel, kobo_api, registry as registry_mod
+from . import repeats as repeats_mod
+from . import validation, xmlbuild
 
 # Regroupement des notifications vers l'interface (point 18).
 PROGRESS_INTERVAL = 0.15      # secondes entre deux rafraichissements
@@ -163,6 +167,7 @@ class ImportEngine:
         stop_event=None,
         validation_report=None,
         verify_form_version=True,
+        repeat_data=None,
     ):
         self.config = config
         self.dataframe = dataframe
@@ -194,10 +199,54 @@ class ImportEngine:
             dataframe.iloc[:, positions].itertuples(index=False, name=None)
         )
 
-        self.row_keys = registry_mod.compute_row_keys(dataframe, source_id)
+        # Groupes repetes : une feuille par repetition, rattachee a la ligne
+        # principale. Absents, tout se comporte comme avant.
+        self.repeat_data = list(repeat_data or [])
+        self._parent_keys, _column, _positional = repeats_mod.parent_keys(dataframe)
+        for data in self.repeat_data:
+            self._types.update(
+                {status.path: status.question.type for status in data.mapped_columns}
+            )
+
+        self.row_keys = registry_mod.compute_row_keys(
+            dataframe, source_id, extra=self._repeat_fingerprints()
+        )
         self.states = {}
         self._last_progress = 0.0
         self._started = time.monotonic()
+
+    def _repeat_fingerprints(self):
+        """Empreinte des repetitions de chaque ligne principale.
+
+        Entre dans la cle de ligne : corriger uniquement une ligne enfant doit
+        suffire a faire repartir la soumission correspondante.
+        """
+        if not self.repeat_data:
+            return []
+        empreintes = []
+        for key in self._parent_keys:
+            morceaux = []
+            for data in self.repeat_data:
+                for position in data.instances_for(key):
+                    valeurs = [
+                        str(data.frame.iat[position, status.index])
+                        for status in data.mapped_columns
+                    ]
+                    morceaux.append(data.path + ":" + "|".join(valeurs))
+            empreintes.append("&".join(morceaux))
+        return empreintes
+
+    def repeat_instances(self, position):
+        """Repetitions rattachees a une ligne principale, pretes pour le XML."""
+        if not self.repeat_data:
+            return []
+        key = self._parent_keys[position]
+        assemblees = []
+        for data in self.repeat_data:
+            instances = repeats_mod.build_instances(data, key, self._types)
+            if instances:
+                assemblees.append((data.path, instances))
+        return assemblees
 
     # -- boucle principale -------------------------------------------------
 
@@ -336,6 +385,7 @@ class ImportEngine:
                 root_name=self.schema.uid,
                 form_version=self.schema.version,
                 instance_id=instance_id,
+                repeats=self.repeat_instances(position),
             )
 
             if self.config.get("dry_run"):

@@ -15,7 +15,7 @@
 ; Le programme d'installation obtenu se trouve dans le dossier « installeur ».
 
 #define MonNom          "Kobo Importer"
-#define MaVersion       "3.1.0"
+#define MaVersion       "3.2.0"
 #define MonEditeur      "Data Solution - Adnan Adamou"
 #define MonExecutable   "KoboImporter.exe"
 
