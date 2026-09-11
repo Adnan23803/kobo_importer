@@ -664,8 +664,11 @@ class FileStep(Step):
             # sur la reconnaissance par nom de colonne.
             statuses = validation.map_columns(frame.columns, form_schema, overrides)
             report = validation.validate_dataframe(frame, form_schema, overrides=overrides)
+            # Les correspondances manuelles portent sur la feuille principale :
+            # les appliquer aux feuilles enfants ecarterait ou detournerait des
+            # colonnes homonymes sans que l'utilisateur l'ait demande.
             repeat_data, repeat_warnings = repeats_mod.prepare(
-                frame, child_frames, form_schema, overrides
+                frame, child_frames, form_schema
             )
             return frame, used, signature, statuses, report, repeat_data, repeat_warnings
 

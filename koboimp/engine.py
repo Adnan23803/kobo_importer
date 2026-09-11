@@ -203,6 +203,11 @@ class ImportEngine:
         # principale. Absents, tout se comporte comme avant.
         self.repeat_data = list(repeat_data or [])
         self._parent_keys, _column, _positional = repeats_mod.parent_keys(dataframe)
+        # Un numero de ligne principale en double rend le rattachement
+        # indecidable : les deux lignes recevraient les memes repetitions.
+        self._duplicate_keys = (
+            repeats_mod.duplicate_keys(self._parent_keys) if self.repeat_data else set()
+        )
         for data in self.repeat_data:
             self._types.update(
                 {status.path: status.question.type for status in data.mapped_columns}
@@ -247,6 +252,31 @@ class ImportEngine:
             if instances:
                 assemblees.append((data.path, instances))
         return assemblees
+
+    def _repeat_blocker(self, position):
+        """Motif interdisant l'envoi de cette ligne, du fait de ses repetitions."""
+        if not self.repeat_data:
+            return ""
+
+        key = self._parent_keys[position]
+
+        if key in self._duplicate_keys:
+            return (
+                f"Le numero de ligne « {key} » apparait plusieurs fois dans la "
+                "feuille principale : impossible de savoir quelles repetitions "
+                "lui appartiennent. Corrigez la numerotation."
+            )
+
+        motifs = []
+        for data in self.repeat_data:
+            motifs.extend(data.problems_for(key))
+        if not motifs:
+            return ""
+
+        apercu = " ; ".join(motifs[:3])
+        if len(motifs) > 3:
+            apercu += f" ; et {len(motifs) - 3} autre(s)"
+        return f"Repetition a corriger — {apercu}"
 
     # -- boucle principale -------------------------------------------------
 
@@ -374,6 +404,14 @@ class ImportEngine:
             acceptable, reason = validation.validate_row_values(values, self.schema)
             if not acceptable:
                 return _Outcome(position, registry_mod.INVALID, message=reason)
+
+            # Les repetitions rattachees doivent etre saines elles aussi. Une
+            # ligne enfant fautive rend la ligne principale non envoyable,
+            # plutot que d'etre omise en silence : perdre un membre du menage
+            # sans le dire serait pire qu'un refus explicite.
+            empechement = self._repeat_blocker(position)
+            if empechement:
+                return _Outcome(position, registry_mod.INVALID, message=empechement)
 
             pairs = xmlbuild.row_to_pairs(values, self._types)
             if not pairs:

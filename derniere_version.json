@@ -1,6 +1,6 @@
 {
   "_commentaire": "Manifeste de version lu par Kobo Importer. Publiez ce fichier a une adresse fixe (par exemple a la racine de votre depot GitHub) et inscrivez cette adresse dans updates.DEFAULT_UPDATE_URL avant de construire l'executable (deja fait pour ce depot). Mettez a jour 'version', 'url' et 'notes' a chaque publication. Les cles commencant par _ sont ignorees.",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "url": "https://github.com/Adnan23803/kobo_importer/releases/latest",
-  "notes": "Import des groupes repetes (begin_repeat) : une feuille par repetition, rattachee par _parent_index selon la convention des exports Kobo. Le test de connexion ne signale plus un echec quand seul le formulaire memorise est devenu inaccessible."
+  "notes": "Correctifs issus d'un audit des groupes repetes : les valeurs des feuilles enfants sont desormais verifiees hors ligne (type, contrainte, obligatoire, choix), les numeros de ligne en double sont refuses au lieu de dupliquer les repetitions, et la correspondance manuelle ne deborde plus sur les feuilles enfants."
 }

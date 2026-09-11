@@ -338,6 +338,130 @@ base2.close()
 
 
 # ==========================================================================
+section("Defauts corriges apres audit")
+# ==========================================================================
+
+# --- Les valeurs des feuilles enfants sont controlees ----------------------
+# Sans cela, un age aberrant ou un choix inexistant partait au serveur, qui
+# refusait toute la soumission en ne designant que la ligne principale.
+
+P_AUDIT = pd.DataFrame({"_index": [1, 2, 3], "nom_chef": ["Issa", "Fati", "Ali"]})
+M_AUDIT = pd.DataFrame({
+    "_parent_index": [1, 1, 2, 3],
+    "prenom": ["Ali", None, "Zara", "Bon"],   # obligatoire manquant -> menage 1
+    "age": [12, 30, 999, 25],                 # contrainte violee    -> menage 2
+    "sexe": ["m", "f", "f", "m"],
+})
+audit, avert_audit = repeats.prepare(P_AUDIT, {"membres": M_AUDIT}, FORME)
+donnees_audit = audit[0]
+
+check("valeurs enfants verifiees", donnees_audit.report is not None
+      and donnees_audit.report.issue_count == 2,
+      str(getattr(donnees_audit.report, "issue_count", None)))
+check("obligatoire manquant chez l'enfant repere",
+      any("obligatoire" in m for m in donnees_audit.problems_for("1")),
+      str(donnees_audit.problems_for("1")))
+check("contrainte violee chez l'enfant reperee",
+      any("0 et 120" in m for m in donnees_audit.problems_for("2")),
+      str(donnees_audit.problems_for("2")))
+check("le motif nomme la feuille et la ligne",
+      "membres" in donnees_audit.problems_for("1")[0]
+      and "ligne 3" in donnees_audit.problems_for("1")[0],
+      str(donnees_audit.problems_for("1")))
+check("menage sain non penalise", donnees_audit.problems_for("3") == [])
+check("l'utilisateur est averti",
+      any("a corriger" in a for a in avert_audit), str(avert_audit))
+
+
+def executer(principal, prepares, source):
+    dossier = tempfile.mkdtemp(dir=_TEMP)
+    reglages = {
+        "dry_run": False, "resume_mode": "force", "max_workers": 1,
+        "output_dir": os.path.join(dossier, "e"),
+        "log_file": os.path.join(dossier, "j.csv"),
+        "report_dir": os.path.join(dossier, "r"),
+    }
+    depot = registry.Registry(os.path.join(dossier, "r.db"))
+    envoyeur = ClientCapture()
+    try:
+        resultat = engine_mod.ImportEngine(
+            reglages, principal, FORME,
+            validation.map_columns(principal.columns, FORME),
+            source, "f.xlsx", envoyeur, depot,
+            stop_event=threading.Event(), repeat_data=prepares,
+        ).run()
+    finally:
+        depot.close()
+    return resultat, envoyeur
+
+
+res_audit, cli_audit = executer(P_AUDIT, audit, "AUDIT1")
+check("ligne fautive non envoyee, pas amputee",
+      res_audit.sent == 1 and res_audit.invalid == 2,
+      f"envoyees={res_audit.sent} invalides={res_audit.invalid}")
+check("seul le menage sain part",
+      [ET.fromstring(p).findtext("nom_chef") for p in cli_audit.envois] == ["Ali"])
+check("le rapport porte le motif enfant",
+      all("Repetition a corriger" in f["message"] for f in res_audit.failures),
+      str([f["message"][:40] for f in res_audit.failures]))
+
+# --- Numeros principaux en double ------------------------------------------
+# Ils rendaient le rattachement indecidable : deux lignes recevaient les memes
+# repetitions, dupliquant des donnees sans le moindre signal.
+
+P_DOUBLE = pd.DataFrame({"_index": [1, 1], "nom_chef": ["Issa", "Fati"]})
+M_DOUBLE = pd.DataFrame({"_parent_index": [1], "prenom": ["Ali"],
+                         "age": [10], "sexe": ["m"]})
+check("doublons reperes", repeats.duplicate_keys(["1", "1", "2"]) == {"1"})
+double, avert_double = repeats.prepare(P_DOUBLE, {"membres": M_DOUBLE}, FORME)
+check("doublon annonce", any("double" in a for a in avert_double), str(avert_double))
+
+res_double, cli_double = executer(P_DOUBLE, double, "AUDIT2")
+check("aucune duplication silencieuse", len(cli_double.envois) == 0,
+      str(len(cli_double.envois)))
+check("les deux lignes ambigues sont refusees", res_double.invalid == 2,
+      str(res_double.invalid))
+
+# --- La correspondance manuelle ne deborde pas sur les enfants --------------
+# `prepare` n'accepte plus d'overrides : interface et ligne de commande
+# produisaient sinon des resultats differents pour le meme fichier.
+import inspect  # noqa: E402
+
+check("prepare sans parametre overrides",
+      "overrides" not in inspect.signature(repeats.prepare).parameters,
+      str(list(inspect.signature(repeats.prepare).parameters)))
+
+# --- Le message d'aide designe la bonne feuille ----------------------------
+IMBRIQUE_GROUPE = schema.parse_asset({
+    "uid": "aG", "name": "G", "content": {"survey": [
+        {"type": "begin_group", "name": "menage", "label": ["Menage"]},
+        {"type": "begin_repeat", "name": "membres", "label": ["Membres"]},
+        {"type": "text", "name": "prenom", "label": ["Prenom"]},
+        {"type": "end_repeat"},
+        {"type": "end_group"},
+    ], "choices": []}})
+statut_aide = validation.map_columns(["prenom"], IMBRIQUE_GROUPE)[0]
+check("feuille correctement designee",
+      "membres" in statut_aide.message and "menage »" not in statut_aide.message,
+      statut_aide.message)
+check("repeat_for retrouve le groupe porteur",
+      IMBRIQUE_GROUPE.repeat_for(IMBRIQUE_GROUPE.get("prenom")).name == "membres")
+
+# --- Une colonne metier n'est pas prise pour une cle de structure -----------
+check("parent_id n'est plus un alias cote principal",
+      "parent_id" not in repeats.PARENT_ALIASES
+      and "id_parent" not in repeats.PARENT_ALIASES,
+      str(repeats.PARENT_ALIASES))
+METIER = pd.DataFrame({"parent_id": [77, 88], "nom": ["a", "b"]})
+cles_metier, colonne_metier, positionnel = repeats.parent_keys(METIER)
+check("colonne metier ignoree, numerotation implicite",
+      colonne_metier == "" and positionnel and cles_metier == ["1", "2"],
+      f"{colonne_metier!r} {cles_metier}")
+check("parent_id reste reconnu cote enfant",
+      "parent_id" in repeats.CHILD_ALIASES)
+
+
+# ==========================================================================
 section("Resultat")
 print(f"\n{len(PASSED)} verification(s) reussie(s), {len(FAILED)} echec(s).")
 for echec in FAILED:

@@ -228,6 +228,23 @@ class FormSchema:
                 return group
         return None
 
+    def repeat_for(self, question):
+        """Groupe repete contenant cette question, ou None.
+
+        Le nom de la feuille attendue n'est pas devinable a partir du chemin :
+        « menage/membres/prenom » se remplit dans la feuille « membres », pas
+        « menage ». Designer la mauvaise feuille enverrait l'utilisateur
+        corriger au mauvais endroit.
+        """
+        chemin = getattr(question, "path", str(question or ""))
+        candidat = None
+        for group in self.repeats:
+            if chemin.startswith(group.path + "/"):
+                # Le groupe le plus profond est celui qui porte la question.
+                if candidat is None or len(group.path) > len(candidat.path):
+                    candidat = group
+        return candidat
+
     @property
     def importable_repeats(self):
         """Repetitions qu'un classeur peut alimenter : les non imbriquees."""

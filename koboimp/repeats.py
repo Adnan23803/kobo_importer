@@ -25,13 +25,17 @@ PARENT_KEY = "_index"
 CHILD_KEY = "_parent_index"
 
 # Autres graphies rencontrees selon l'outil qui a produit le classeur.
-PARENT_ALIASES = ("_index", "index", "_id", "id_parent", "parent_id")
+# Cote principal, seuls des identifiants de ligne. « parent_id » et
+# « id_parent » en sont volontairement exclus : ce sont des noms cote enfant,
+# et une colonne metier ainsi nommee dans la feuille principale serait prise
+# pour une cle de structure, faussant tout le rattachement.
+PARENT_ALIASES = ("_index", "index", "_id")
 CHILD_ALIASES = ("_parent_index", "parent_index", "_parent_id", "parent_id", "id_parent")
 
 
 @dataclass
 class RepeatData:
-    """Une feuille de repetition, lue et rattachee."""
+    """Une feuille de repetition, lue, rattachee et verifiee."""
 
     group: object                       # schema.RepeatGroup
     sheet: str = ""
@@ -42,6 +46,8 @@ class RepeatData:
     parent_column: str = ""
     child_column: str = ""
     positional: bool = False            # rattachement par numero de ligne
+    report: object = None               # validation.ValidationReport de la feuille
+    invalid_parents: dict = field(default_factory=dict)  # cle parent -> [motifs]
 
     @property
     def path(self):
@@ -55,8 +61,16 @@ class RepeatData:
     def mapped_columns(self):
         return [status for status in self.column_statuses if status.is_mapped]
 
+    @property
+    def linked_rows(self):
+        return sum(len(positions) for positions in self.by_parent.values())
+
     def instances_for(self, parent_key):
         return self.by_parent.get(parent_key, [])
+
+    def problems_for(self, parent_key):
+        """Motifs empechant d'envoyer la ligne principale, s'il y en a."""
+        return self.invalid_parents.get(parent_key, [])
 
 
 def _find_column(columns, aliases):
@@ -145,16 +159,6 @@ def link_children(child_frame, parent_key_list):
     return by_parent, orphans, column
 
 
-def link_columns(frame):
-    """Colonnes de liaison presentes, pour les exclure des reponses envoyees."""
-    found = set()
-    for aliases in (PARENT_ALIASES, CHILD_ALIASES):
-        column = _find_column(frame.columns, aliases)
-        if column:
-            found.add(column)
-    return found
-
-
 def match_sheets(sheet_names, form_schema, main_sheet=""):
     """Associe les feuilles du classeur aux groupes repetes du formulaire.
 
@@ -178,11 +182,46 @@ def match_sheets(sheet_names, form_schema, main_sheet=""):
     return matched, ignored
 
 
-def prepare(main_frame, child_frames, form_schema, overrides=None):
-    """Assemble les feuilles de repetition lues en objets exploitables.
+def duplicate_keys(parent_key_list):
+    """Cles principales apparaissant plusieurs fois.
+
+    Deux lignes principales portant le meme `_index` rendent le rattachement
+    indecidable : impossible de savoir a laquelle appartiennent les enfants.
+    Les deux recevraient les memes repetitions, ce qui dupliquerait des donnees
+    sans que rien ne le signale.
+    """
+    compte = {}
+    for key in parent_key_list:
+        compte[key] = compte.get(key, 0) + 1
+    return {key for key, total in compte.items() if key and total > 1}
+
+
+def _issues_by_row(report):
+    """{position dans la feuille: [motifs]} a partir d'un rapport de controle."""
+    grouped = {}
+    if report is None:
+        return grouped
+    for issue in report.row_issues:
+        grouped.setdefault(issue.row_number - 2, []).append(
+            f"{issue.column} : {issue.message}"
+        )
+    return grouped
+
+
+def prepare(main_frame, child_frames, form_schema):
+    """Assemble, rattache et **verifie** les feuilles de repetition.
 
     child_frames : {nom_de_feuille: dataframe}
     Retourne (liste de RepeatData, avertissements a montrer a l'utilisateur).
+
+    Le controle des valeurs enfants n'est pas un supplement : sans lui, un age
+    aberrant ou un choix inexistant dans une ligne enfant ferait refuser toute
+    la soumission par le serveur, et le message ne designerait que la ligne
+    principale. L'utilisateur chercherait la faute au mauvais endroit.
+
+    Une ligne enfant fautive rend sa ligne principale non envoyable, plutot que
+    d'etre silencieusement omise : perdre un membre du menage sans le dire
+    serait pire qu'un refus explicite.
     """
     from . import validation
 
@@ -192,6 +231,7 @@ def prepare(main_frame, child_frames, form_schema, overrides=None):
         return prepared, warnings
 
     keys, _column, positional = parent_keys(main_frame)
+    doublons = duplicate_keys(keys)
 
     for sheet, frame in child_frames.items():
         group = form_schema.repeat(sheet)
@@ -199,21 +239,39 @@ def prepare(main_frame, child_frames, form_schema, overrides=None):
             continue
 
         # Le groupe repete expose la meme interface qu'un formulaire : la
-        # feuille enfant passe donc par exactement le meme controle de colonnes.
-        statuses = validation.map_columns(frame.columns, group, overrides)
+        # feuille enfant passe donc par exactement le meme controle que la
+        # feuille principale, colonnes comme valeurs.
+        statuses = validation.map_columns(frame.columns, group)
+        report = validation.validate_dataframe(frame, group)
         by_parent, orphans, child_column = link_children(frame, keys)
 
         data = RepeatData(
             group=group, sheet=sheet, frame=frame, column_statuses=statuses,
             by_parent=by_parent, orphans=orphans, child_column=child_column,
-            positional=positional,
+            positional=positional, report=report,
         )
+
+        # Report des fautes enfants sur les lignes principales concernees.
+        par_ligne = _issues_by_row(report)
+        for parent_key, positions in by_parent.items():
+            motifs = []
+            for position in positions:
+                for motif in par_ligne.get(position, []):
+                    motifs.append(f"feuille « {sheet} » ligne {position + 2} — {motif}")
+            if motifs:
+                data.invalid_parents[parent_key] = motifs
+
         prepared.append(data)
 
         if not data.mapped_columns:
             warnings.append(
                 f"Feuille « {sheet} » : aucune colonne ne correspond aux questions "
                 f"de la repetition « {group.display_label()} ». Elle sera ignoree."
+            )
+        for question in report.missing_required:
+            warnings.append(
+                f"Feuille « {sheet} » : la question obligatoire "
+                f"« {group.relative(question.path)} » n'a pas de colonne."
             )
         if not child_column:
             warnings.append(
@@ -227,12 +285,25 @@ def prepare(main_frame, child_frames, form_schema, overrides=None):
                 f"principale inexistante (colonne « {child_column} ») et ne seront "
                 "pas envoyees."
             )
+        if report.issue_count:
+            warnings.append(
+                f"Feuille « {sheet} » : {report.issue_count} valeur(s) a corriger. "
+                "Les lignes principales concernees ne seront pas envoyees."
+            )
+
+    if doublons and prepared:
+        apercu = ", ".join(sorted(doublons)[:5])
+        warnings.append(
+            f"La feuille principale contient des numeros en double ({apercu}). "
+            "Impossible de savoir a quelle ligne rattacher les repetitions : "
+            "ces lignes ne seront pas envoyees. Corrigez la numerotation."
+        )
 
     if positional and prepared:
         warnings.append(
-            "La feuille principale n'a pas de colonne « _index » : le rattachement "
-            "se fait sur le numero de ligne (1, 2, 3...). Verifiez que les valeurs "
-            f"de « {CHILD_KEY} » suivent bien cette numerotation."
+            f"La feuille principale n'a pas de colonne « {PARENT_KEY} » : le "
+            "rattachement se fait sur le numero de ligne (1, 2, 3...). Verifiez "
+            f"que les valeurs de « {CHILD_KEY} » suivent bien cette numerotation."
         )
 
     for group in form_schema.repeats:

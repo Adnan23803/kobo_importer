@@ -192,11 +192,13 @@ def map_columns(columns, form_schema, overrides=None):
         # Une question de repetition n'a rien a faire dans la feuille
         # principale ; elle est au contraire attendue dans la feuille dediee.
         if question.in_repeat and not getattr(form_schema, "is_repeat_scope", False):
+            groupe = form_schema.repeat_for(question) if form_schema else None
+            feuille = groupe.sheet_name() if groupe else question.path.split("/")[0]
             statuses.append(ColumnStatus(
                 column=column, status=COL_REPEAT, index=position,
                 path=question.path, question=question,
                 message="Question d'un groupe repete : renseignez-la dans la feuille "
-                        f"« {question.path.split('/')[0]} » du classeur.",
+                        f"« {feuille} » du classeur.",
             ))
             continue
 

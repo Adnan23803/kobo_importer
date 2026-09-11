@@ -163,6 +163,13 @@ class Session:
             return False, self.validation_report.headline()
         if not any(status.is_mapped for status in self.column_statuses):
             return False, "Aucune colonne du fichier ne correspond au formulaire."
+        for data in self.repeat_data:
+            if data.report is not None and data.report.missing_required:
+                manquante = data.group.relative(data.report.missing_required[0].path)
+                return False, (
+                    f"Feuille « {data.sheet} » : la question obligatoire "
+                    f"« {manquante} » n'a pas de colonne."
+                )
         return True, ""
 
     def close(self):
