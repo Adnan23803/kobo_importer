@@ -24,6 +24,7 @@ dans un classeur corrigeable et reimportable tel quel.
 - [Profils de configuration](#profils-de-configuration)
 - [Ligne de commande](#ligne-de-commande)
 - [Publier une mise a jour](#publier-une-mise-a-jour)
+- [Ce qui a change en version 3.2](#ce-qui-a-change-en-version-32)
 - [Ce qui a change en version 3.1](#ce-qui-a-change-en-version-31)
 - [Ce qui a change en version 3.0](#ce-qui-a-change-en-version-30)
 - [Limites connues](#limites-connues)
@@ -86,7 +87,7 @@ genere automatiquement et propose a l'ouverture.
 
 ## Installation
 
-**Avec l'installeur** (recommande) : lancez `KoboImporter_3.0.0_installation.exe`.
+**Avec l'installeur** (recommande) : lancez `KoboImporter_<version>_installation.exe`.
 L'installation se fait pour l'utilisateur courant et ne demande pas de droits
 administrateur. Un raccourci est cree sur le Bureau si vous le souhaitez.
 
@@ -200,7 +201,7 @@ python tests\test_repetitions.py    # groupes repetes, du classeur au XML envoye
 python tests\smoke_ui.py            # interface : navigation et import complet
 ```
 
-**509 verifications au total.** `build_exe.bat` execute les quatre suites et
+**518 verifications au total.** `build_exe.bat` execute les quatre suites et
 refuse de construire si l'une echoue.
 
 Aucune dependance de test externe, aucun appel reseau : le serveur Kobo est

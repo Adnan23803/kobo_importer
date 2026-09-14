@@ -377,6 +377,73 @@ try:
 except Exception as exc:  # noqa: BLE001
     check("point 3 : fenetre Correspondance", False, f"{exc.__class__.__name__} : {exc}")
 
+# --- parametres avances : les adresses techniques sont repliees -----------
+# Trois champs vides accompagnes d'un exemple grise laissaient croire a
+# l'utilisateur ordinaire qu'il devait les remplir, alors qu'une saisie erronee
+# ne peut que casser ce qui fonctionne.
+from koboimp.ui.widgets import Collapsible  # noqa: E402
+
+try:
+    avances = app_mod.AdvancedDialog(app)
+    app.update()
+
+    def _trouver_repliables(widget, trouves):
+        for enfant in widget.winfo_children():
+            if isinstance(enfant, Collapsible):
+                trouves.append(enfant)
+            _trouver_repliables(enfant, trouves)
+        return trouves
+
+    repliables = _trouver_repliables(avances, [])
+    check("avances : un bloc technique replie", len(repliables) == 1, str(len(repliables)))
+
+    bloc = repliables[0]
+    check("avances : replie a l'ouverture",
+          not bloc.expanded and not bloc.body.winfo_ismapped())
+    bloc.toggle()
+    app.update()
+    check("avances : s'ouvre au clic", bloc.expanded and bool(bloc.body.winfo_ismapped()))
+    bloc.toggle()
+    app.update()
+    check("avances : se referme", not bloc.body.winfo_ismapped())
+
+    # Les reglages restent enregistrables, simplement moins exposes.
+    avances.kpi_var.set("https://api.test")
+    avances.update_var.set("https://maj.test/v.json")
+    avances.collect()
+    check("avances : adresse API enregistree",
+          app.session.config["kpi_base_url"] == "https://api.test")
+    check("avances : adresse de manifeste enregistree",
+          app.session.config["update_url"] == "https://maj.test/v.json")
+    avances.kpi_var.set("")
+    avances.update_var.set("")
+    avances.collect()
+    check("avances : champ vide = comportement par defaut",
+          app.session.config["update_url"] == "" and app.session.config["kpi_base_url"] == "")
+
+    # Ce qui compte pour l'utilisateur reste visible sans rien deplier.
+    visibles = []
+
+    def _collecter_textes(widget):
+        for enfant in widget.winfo_children():
+            try:
+                valeur = enfant.cget("text")
+            except Exception:  # noqa: BLE001 - widget sans texte
+                valeur = None
+            if valeur:
+                visibles.append(str(valeur))
+            _collecter_textes(enfant)
+
+    _collecter_textes(avances)
+    check("avances : version installee visible",
+          any("Version installee" in t for t in visibles))
+    check("avances : bouton de verification visible",
+          any("Verifier maintenant" in t for t in visibles))
+    avances.destroy()
+    app.update()
+except Exception as exc:  # noqa: BLE001
+    check("avances : un bloc technique replie", False, f"{exc.__class__.__name__} : {exc}")
+
 # --- fenetre de mise a jour : le lien doit etre utilisable ----------------
 # Une boite de message standard affiche un texte fige : l'adresse ne pouvait
 # etre ni selectionnee, ni copiee, ni ouverte.

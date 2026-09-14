@@ -32,7 +32,7 @@ from .. import updates
 from . import theme
 from .dialogs import DiagnosticDialog, HistoryDialog, ProfileDialog, UpdateDialog
 from .steps import APP_TITLE, ConnectionStep, FileStep, FormStep, ImportStep
-from .widgets import Card, StepIndicator
+from .widgets import Card, Collapsible, StepIndicator
 
 
 # ==========================================================================
@@ -214,51 +214,45 @@ class AdvancedDialog(ctk.CTkToplevel):
         self._number_row(body, "Delai d'attente par envoi (secondes)", self.timeout_var)
         self._number_row(body, "Tentatives en cas de coupure (1 a 10)", self.attempts_var)
 
-        # --- adresses -----------------------------------------------------
-        kpi, submission, _fallback = config_mod.resolved_endpoints(config)
-        adresses = Card(
-            container, title="Adresses techniques",
-            subtitle="Laissez vide pour que l'application les deduise de l'adresse du serveur. "
-                     "A renseigner uniquement pour un serveur auto-heberge inhabituel.",
-        )
-        adresses.pack(fill="x", pady=(14, 0))
-        body = ctk.CTkFrame(adresses, fg_color="transparent")
-        body.pack(fill="x", padx=18, pady=(0, 18))
-
+        # --- mises a jour (point 13) --------------------------------------
+        #
+        # Seules deux choses interessent l'utilisateur : la version qu'il a, et
+        # un moyen de savoir s'il en existe une plus recente. L'adresse du
+        # manifeste est un reglage de distributeur : elle part plus bas, dans
+        # le bloc replie.
         self.kpi_var = ctk.StringVar(value=config.get("kpi_base_url", ""))
         self.submission_var = ctk.StringVar(value=config.get("submission_base_url", ""))
-        self._text_row(body, "Adresse de l'API (liste des formulaires)", self.kpi_var,
-                       f"deduit : {kpi}")
-        self._text_row(body, "Adresse de reception des soumissions", self.submission_var,
-                       f"deduit : {submission}")
+        self.update_var = ctk.StringVar(value=config.get("update_url", ""))
 
-        # --- mises a jour (point 13) --------------------------------------
-        maj = Card(
-            container, title="Mises a jour",
-            subtitle="Adresse d'un fichier JSON annoncant la derniere version publiee. "
-                     "Laissez vide pour desactiver : aucune requete ne sera alors emise. "
-                     "Renseignez-la si votre organisation publie les mises a jour de "
-                     "Kobo Importer a une adresse fixe.",
-        )
+        maj = Card(container, title="Mises a jour")
         maj.pack(fill="x", pady=(14, 0))
         body = ctk.CTkFrame(maj, fg_color="transparent")
         body.pack(fill="x", padx=18, pady=(0, 18))
 
-        self.update_var = ctk.StringVar(value=config.get("update_url", ""))
-        self._text_row(
-            body, "Adresse du manifeste de version", self.update_var,
-            "https://exemple.org/koboimporter/derniere_version.json",
-        )
+        ctk.CTkLabel(
+            body, text=f"Version installee : {__version__}",
+            font=theme.font(14, "bold"), text_color=theme.TEXT, anchor="w",
+        ).pack(fill="x")
+
+        surveille = bool(updates.resolve_url(config))
+        ctk.CTkLabel(
+            body,
+            text="L'application verifie au demarrage si une version plus recente existe."
+                 if surveille else
+                 "Aucune verification automatique n'est configuree sur cette installation.",
+            font=theme.small_font(), text_color=theme.TEXT_MUTED,
+            anchor="w", justify="left", wraplength=640,
+        ).pack(fill="x", pady=(2, 0))
 
         ctk.CTkButton(
             body, text="Verifier maintenant", height=36, corner_radius=theme.RADIUS,
             fg_color="transparent", border_width=1, border_color=theme.CARD_BORDER,
             text_color=theme.TEXT, hover_color=theme.NEUTRAL_BG,
             command=self.check_update_now,
-        ).pack(fill="x", pady=(10, 0))
+        ).pack(fill="x", pady=(12, 0))
 
         self.update_label = ctk.CTkLabel(
-            body, text=f"Version installee : {__version__}", font=theme.small_font(),
+            body, text="", font=theme.small_font(),
             text_color=theme.TEXT_MUTED, anchor="w", justify="left", wraplength=640,
         )
         self.update_label.pack(fill="x", pady=(8, 0))
@@ -329,6 +323,38 @@ class AdvancedDialog(ctk.CTkToplevel):
             body, text="Oublier l'historique du fichier courant", height=36,
             corner_radius=theme.RADIUS, fg_color=theme.DANGER_BUTTON,
             hover_color=theme.DANGER_BUTTON_HOVER, command=self.forget_history,
+        ).pack(fill="x", pady=(10, 0))
+
+        # --- reglages techniques, replies ----------------------------------
+        #
+        # Trois adresses que personne ne doit toucher sur une installation
+        # normale : elles sont deduites de l'adresse du serveur, ou inscrites
+        # dans le programme. Affichees en permanence, ces champs vides avec
+        # leur exemple grise laissaient croire qu'il fallait les remplir.
+        kpi, submission, _fallback = config_mod.resolved_endpoints(config)
+        technique = Collapsible(
+            container,
+            title="Reglages techniques",
+            subtitle="A n'ouvrir qu'en cas de serveur auto-heberge inhabituel, ou sur "
+                     "consigne de la personne qui vous a fourni l'application. "
+                     "Le bouton « Diagnostic » vous dira si l'une de ces adresses pose "
+                     "probleme ; inutile d'y toucher autrement.",
+        )
+        technique.pack(fill="x", pady=(14, 0))
+
+        self._text_row(technique.body, "Adresse de l'API (liste des formulaires)",
+                       self.kpi_var, f"deduit : {kpi}")
+        self._text_row(technique.body, "Adresse de reception des soumissions",
+                       self.submission_var, f"deduit : {submission}")
+        self._text_row(
+            technique.body, "Adresse du manifeste de version", self.update_var,
+            f"inscrit dans le programme : {updates.DEFAULT_UPDATE_URL or '(aucune)'}",
+        )
+        ctk.CTkLabel(
+            technique.body,
+            text="Laissez ces champs vides pour conserver le comportement par defaut.",
+            font=theme.small_font(), text_color=theme.TEXT_MUTED,
+            anchor="w", justify="left", wraplength=620,
         ).pack(fill="x", pady=(10, 0))
 
         # --- pied ---------------------------------------------------------

@@ -28,6 +28,60 @@ class Card(ctk.CTkFrame):
             ).pack(fill="x", padx=18, pady=(0, 10))
 
 
+class Collapsible(ctk.CTkFrame):
+    """Bloc replie par defaut, a n'ouvrir que si l'on sait pourquoi.
+
+    Certains reglages n'ont de sens que pour un serveur auto-heberge
+    inhabituel. Les afficher en permanence, sous forme de champs vides
+    accompagnes d'un exemple grise, suggere a l'utilisateur ordinaire qu'il
+    devrait les remplir — alors qu'une saisie erronee ne peut que casser ce qui
+    fonctionne. Les replier les rend accessibles sans les rendre tentants.
+    """
+
+    def __init__(self, parent, title, subtitle="", expanded=False, **kwargs):
+        kwargs.setdefault("corner_radius", theme.CARD_RADIUS)
+        kwargs.setdefault("fg_color", theme.CARD_BG)
+        kwargs.setdefault("border_width", 1)
+        kwargs.setdefault("border_color", theme.CARD_BORDER)
+        super().__init__(parent, **kwargs)
+
+        self._title = title
+        self._expanded = bool(expanded)
+
+        self._toggle = ctk.CTkButton(
+            self, text="", anchor="w", height=42, corner_radius=theme.RADIUS,
+            font=theme.heading_font(), fg_color="transparent",
+            text_color=theme.TEXT, hover_color=theme.NEUTRAL_BG,
+            command=self.toggle,
+        )
+        self._toggle.pack(fill="x", padx=10, pady=(8, 0))
+
+        if subtitle:
+            ctk.CTkLabel(
+                self, text=subtitle, font=theme.small_font(), text_color=theme.TEXT_MUTED,
+                anchor="w", justify="left", wraplength=620,
+            ).pack(fill="x", padx=18, pady=(2, 0))
+
+        self.body = ctk.CTkFrame(self, fg_color="transparent")
+        self._refresh()
+
+    @property
+    def expanded(self):
+        return self._expanded
+
+    def toggle(self):
+        self._expanded = not self._expanded
+        self._refresh()
+
+    def _refresh(self):
+        fleche = "▾" if self._expanded else "▸"
+        self._toggle.configure(text=f"  {fleche}  {self._title}")
+        if self._expanded:
+            self.body.pack(fill="x", padx=18, pady=(8, 16))
+        else:
+            self.body.pack_forget()
+
+
 class Badge(ctk.CTkLabel):
     """Pastille coloree : etat d'une colonne, d'une etape, d'un resultat."""
 

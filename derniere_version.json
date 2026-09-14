@@ -1,6 +1,6 @@
 {
   "_commentaire": "Manifeste de version lu par Kobo Importer. Publiez ce fichier a une adresse fixe (par exemple a la racine de votre depot GitHub) et inscrivez cette adresse dans updates.DEFAULT_UPDATE_URL avant de construire l'executable (deja fait pour ce depot). Mettez a jour 'version', 'url' et 'notes' a chaque publication. Les cles commencant par _ sont ignorees.",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "url": "https://github.com/Adnan23803/kobo_importer/releases/latest",
-  "notes": "L'annonce de mise a jour indique desormais l'adresse de telechargement dans un champ selectionnable, avec un bouton pour la copier et un autre pour ouvrir la page dans le navigateur. Une version peut etre ecartee pour ne plus etre signalee a chaque demarrage."
+  "notes": "Les trois adresses techniques (API, soumissions, manifeste de version) sont regroupees dans un bloc replie des parametres avances : elles ne concernent qu'un serveur auto-heberge inhabituel. La carte « Mises a jour » ne montre plus que la version installee et le bouton de verification."
 }
