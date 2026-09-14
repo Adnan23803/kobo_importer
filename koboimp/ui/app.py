@@ -30,7 +30,7 @@ from .. import kobo_api, paths, profiles, registry as registry_mod
 from .. import repeats as repeats_mod
 from .. import updates
 from . import theme
-from .dialogs import DiagnosticDialog, HistoryDialog, ProfileDialog
+from .dialogs import DiagnosticDialog, HistoryDialog, ProfileDialog, UpdateDialog
 from .steps import APP_TITLE, ConnectionStep, FileStep, FormStep, ImportStep
 from .widgets import Card, StepIndicator
 
@@ -497,6 +497,9 @@ class AdvancedDialog(ctk.CTkToplevel):
                 text=info.headline(),
                 text_color=theme.DANGER if info.error else colors[info.available],
             )
+            if info.available:
+                # Meme fenetre qu'au demarrage : le lien y reste copiable.
+                UpdateDialog(self.app, info).focus()
 
         def failed(exc):
             self.update_label.configure(text=str(exc), text_color=theme.DANGER)
@@ -880,14 +883,15 @@ class App(ctk.CTk):
                 return
             if not info.available:
                 return
+            if info.latest == self.session.config.get("update_skipped_version"):
+                # Version deja ecartee par l'utilisateur : on n'insiste pas.
+                return
             self.log(info.headline(), "warning")
             self.set_status(info.headline(), "warning")
-            parts = [info.headline()]
-            if info.notes:
-                parts.append("Nouveautes :\n" + info.notes[:600])
-            if info.url:
-                parts.append("Telechargement :\n" + info.url)
-            messagebox.showinfo(APP_TITLE, "\n\n".join(parts))
+            # Fenetre dediee plutot qu'une boite de message : l'adresse de
+            # telechargement doit pouvoir etre copiee ou ouverte, pas recopiee
+            # a la main caractere par caractere.
+            UpdateDialog(self, info).focus()
 
         self.run_async(work, done, lambda exc: None)
 

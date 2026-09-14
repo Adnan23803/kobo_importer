@@ -53,6 +53,139 @@ class _Dialog(ctk.CTkToplevel):
 
 
 # ==========================================================================
+# Mise a jour disponible
+# ==========================================================================
+
+class UpdateDialog(_Dialog):
+    """Annonce une version plus recente, avec le lien reellement utilisable.
+
+    Une boite de message standard affiche un texte fige : l'adresse de
+    telechargement ne peut y etre ni selectionnee, ni copiee, ni ouverte.
+    L'utilisateur voyait donc un lien qu'il devait recopier a la main, au
+    caractere pres. Ici le lien est dans un champ selectionnable, un bouton le
+    copie, un autre ouvre directement le navigateur.
+    """
+
+    def __init__(self, app, info):
+        super().__init__(app, "Mise a jour disponible", "660x520", (560, 420))
+        self.info = info
+
+        carte = Card(
+            self,
+            title=f"Version {info.latest} disponible",
+            subtitle=f"Vous utilisez actuellement la version {info.current}.",
+        )
+        carte.pack(fill="x", padx=16, pady=(16, 0))
+
+        corps = ctk.CTkFrame(carte, fg_color="transparent")
+        corps.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+
+        if info.notes:
+            ctk.CTkLabel(
+                corps, text="Nouveautes", font=theme.font(13, "bold"),
+                text_color=theme.TEXT, anchor="w",
+            ).pack(fill="x", pady=(0, 6))
+
+            notes = ctk.CTkTextbox(
+                corps, height=150, wrap="word", corner_radius=theme.RADIUS,
+                font=theme.body_font(), border_width=1, border_color=theme.CARD_BORDER,
+            )
+            notes.pack(fill="both", expand=True)
+            notes.insert("1.0", info.notes)
+            # Lecture seule, mais le texte reste selectionnable et copiable.
+            notes.configure(state="disabled")
+
+        if info.url:
+            ctk.CTkLabel(
+                corps, text="Adresse de telechargement", font=theme.font(13, "bold"),
+                text_color=theme.TEXT, anchor="w",
+            ).pack(fill="x", pady=(14, 6))
+
+            self.lien = ctk.CTkEntry(
+                corps, height=38, corner_radius=theme.RADIUS, font=theme.body_font(),
+            )
+            self.lien.pack(fill="x")
+            self.lien.insert(0, info.url)
+            self.lien.bind("<FocusIn>", lambda _event: self.lien.select_range(0, "end"))
+
+            ctk.CTkLabel(
+                corps,
+                text="Le lien est selectionnable : vous pouvez le copier, ou utiliser "
+                     "les boutons ci-dessous.",
+                font=theme.small_font(), text_color=theme.TEXT_MUTED,
+                anchor="w", justify="left", wraplength=560,
+            ).pack(fill="x", pady=(6, 0))
+        else:
+            self.lien = None
+
+        pied = ctk.CTkFrame(self, fg_color="transparent")
+        pied.pack(fill="x", padx=16, pady=16)
+
+        self.confirmation = ctk.CTkLabel(
+            pied, text="", font=theme.small_font(), text_color=theme.SUCCESS, anchor="w",
+        )
+        self.confirmation.pack(side="left", fill="x", expand=True)
+
+        ctk.CTkButton(
+            pied, text="Plus tard", width=110, height=40, corner_radius=theme.RADIUS,
+            fg_color="transparent", border_width=1, border_color=theme.CARD_BORDER,
+            text_color=theme.TEXT, hover_color=theme.NEUTRAL_BG, command=self.destroy,
+        ).pack(side="right", padx=(8, 0))
+
+        if info.url:
+            ctk.CTkButton(
+                pied, text="Copier le lien", width=140, height=40,
+                corner_radius=theme.RADIUS,
+                fg_color="transparent", border_width=1, border_color=theme.CARD_BORDER,
+                text_color=theme.TEXT, hover_color=theme.NEUTRAL_BG,
+                command=self.copier,
+            ).pack(side="right", padx=(8, 0))
+
+            ctk.CTkButton(
+                pied, text="Ouvrir la page", width=150, height=40,
+                corner_radius=theme.RADIUS, font=theme.font(13, "bold"),
+                fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+                command=self.ouvrir,
+            ).pack(side="right")
+
+        # Ne plus etre relance a chaque demarrage pour une version deja ecartee.
+        self.ignorer = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            self, text=f"Ne plus me signaler la version {info.latest}",
+            variable=self.ignorer, font=theme.small_font(),
+            command=self._appliquer_choix,
+        ).pack(anchor="w", padx=20, pady=(0, 14))
+
+    def copier(self):
+        if not self.info.url:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self.info.url)
+        self.confirmation.configure(text="Lien copie dans le presse-papiers.")
+        if self.lien is not None:
+            self.lien.focus_set()
+
+    def ouvrir(self):
+        if not self.info.url:
+            return
+        import webbrowser
+        try:
+            webbrowser.open(self.info.url)
+            self.confirmation.configure(text="Page ouverte dans votre navigateur.")
+        except Exception:  # noqa: BLE001 - navigateur indisponible
+            self.copier()
+            self.confirmation.configure(
+                text="Navigateur indisponible : le lien a ete copie.",
+                text_color=theme.WARNING,
+            )
+
+    def _appliquer_choix(self):
+        version = self.info.latest if self.ignorer.get() else ""
+        self.session.config["update_skipped_version"] = version
+        self.app.save_config()
+
+
+# ==========================================================================
 # #2 - Diagnostic
 # ==========================================================================
 

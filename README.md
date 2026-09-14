@@ -194,9 +194,14 @@ customtkinter suffit a casser une reconstruction.
 ### Tests
 
 ```bash
-python tests\test_koboimp.py     # noyau, sans interface ni reseau
-python tests\smoke_ui.py         # interface : navigation et import de bout en bout
+python tests\test_koboimp.py        # noyau : XML, validation, registre, moteur
+python tests\test_ameliorations.py  # CSV, contraintes, profils, diagnostic, CLI
+python tests\test_repetitions.py    # groupes repetes, du classeur au XML envoye
+python tests\smoke_ui.py            # interface : navigation et import complet
 ```
+
+**509 verifications au total.** `build_exe.bat` execute les quatre suites et
+refuse de construire si l'une echoue.
 
 Aucune dependance de test externe, aucun appel reseau : le serveur Kobo est
 simule. `smoke_ui.py` ouvre brievement une fenetre et travaille dans un dossier

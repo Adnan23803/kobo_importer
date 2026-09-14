@@ -45,6 +45,9 @@ DEFAULT_CONFIG = {
     # Point 13 : adresse d'un manifeste JSON annoncant la derniere version.
     # Vide = aucune verification, aucun appel reseau.
     "update_url": "",
+    # Version que l'utilisateur a choisi de ne plus se voir signaler. Sans
+    # cela, l'annonce reapparaitrait a chaque demarrage jusqu'a l'installation.
+    "update_skipped_version": "",
 }
 
 RESUME_MODES = {

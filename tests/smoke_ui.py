@@ -377,6 +377,65 @@ try:
 except Exception as exc:  # noqa: BLE001
     check("point 3 : fenetre Correspondance", False, f"{exc.__class__.__name__} : {exc}")
 
+# --- fenetre de mise a jour : le lien doit etre utilisable ----------------
+# Une boite de message standard affiche un texte fige : l'adresse ne pouvait
+# etre ni selectionnee, ni copiee, ni ouverte.
+from koboimp import updates as updates_mod  # noqa: E402
+
+try:
+    annonce = updates_mod.UpdateInfo(
+        available=True, current="3.0.0", latest="9.9.9",
+        url="https://exemple.test/telechargement",
+        notes="Nouveautes de la version de test.",
+    )
+    fenetre_maj = dialogs_mod.UpdateDialog(app, annonce)
+    app.update()
+    check("mise a jour : fenetre ouverte", bool(fenetre_maj.winfo_exists()))
+    check("mise a jour : lien dans un champ de saisie",
+          fenetre_maj.lien is not None and fenetre_maj.lien.get() == annonce.url,
+          str(fenetre_maj.lien.get() if fenetre_maj.lien else None))
+    check("mise a jour : champ selectionnable",
+          str(fenetre_maj.lien.cget("state")) == "normal")
+
+    fenetre_maj.copier()
+    app.update()
+    check("mise a jour : lien copie dans le presse-papiers",
+          app.clipboard_get() == annonce.url)
+
+    import webbrowser  # noqa: E402
+    ouvertes = []
+    origine = webbrowser.open
+    webbrowser.open = lambda url, *a, **k: ouvertes.append(url) or True
+    try:
+        fenetre_maj.ouvrir()
+        app.update()
+    finally:
+        webbrowser.open = origine
+    check("mise a jour : navigateur sollicite", ouvertes == [annonce.url], str(ouvertes))
+
+    fenetre_maj.ignorer.set(True)
+    fenetre_maj._appliquer_choix()
+    check("mise a jour : version ecartee memorisee",
+          app.session.config.get("update_skipped_version") == "9.9.9",
+          str(app.session.config.get("update_skipped_version")))
+    fenetre_maj.ignorer.set(False)
+    fenetre_maj._appliquer_choix()
+    check("mise a jour : choix reversible",
+          app.session.config.get("update_skipped_version") == "")
+    fenetre_maj.destroy()
+    app.update()
+
+    # Un manifeste sans adresse ne doit pas faire planter la fenetre.
+    sans_lien = updates_mod.UpdateInfo(available=True, current="3.0.0", latest="9.9.9")
+    fenetre_nue = dialogs_mod.UpdateDialog(app, sans_lien)
+    app.update()
+    check("mise a jour : manifeste sans lien supporte",
+          bool(fenetre_nue.winfo_exists()) and fenetre_nue.lien is None)
+    fenetre_nue.destroy()
+    app.update()
+except Exception as exc:  # noqa: BLE001
+    check("mise a jour : fenetre ouverte", False, f"{exc.__class__.__name__} : {exc}")
+
 # --- bascule de profil (point 9) -----------------------------------------
 try:
     profiles.create("Profil de test", config_mod.as_payload(app.session.config))
