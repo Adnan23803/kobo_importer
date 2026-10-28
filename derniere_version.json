@@ -1,6 +1,7 @@
 {
   "_commentaire": "Manifeste de version lu par Kobo Importer. Publiez ce fichier a une adresse fixe (par exemple a la racine de votre depot GitHub) et inscrivez cette adresse dans updates.DEFAULT_UPDATE_URL avant de construire l'executable (deja fait pour ce depot). Mettez a jour 'version', 'url' et 'notes' a chaque publication. Les cles commencant par _ sont ignorees.",
-  "version": "3.2.3",
-  "url": "https://github.com/Adnan23803/kobo_importer/releases/latest",
-  "notes": "Les lignes deja recues par le serveur sont reconnues comme doublons, meme apres effacement de l'historique local, import depuis un autre poste ou classeur reenregistre dans Excel. Les reponses a choix ecrites en toutes lettres (libelle au lieu du nom) sont converties automatiquement quand elles sont sans ambiguite. La fenetre de mise a jour permet de verifier l'authenticite de l'installeur telecharge (empreinte SHA-256)."
+  "version": "3.3.0",
+  "url": "https://github.com/Adnan23803/kobo_importer/releases/tag/v3.3.0",
+  "notes": "Les lignes deja recues par le serveur sont reconnues comme doublons, meme apres effacement de l'historique local, import depuis un autre poste ou classeur reenregistre dans Excel. Les reponses a choix ecrites en toutes lettres (libelle au lieu du nom) sont converties automatiquement quand elles sont sans ambiguite. La fenetre de mise a jour permet de verifier l'authenticite de l'installeur telecharge (empreinte SHA-256).",
+  "sha256": "be5d98ba7e38a74d3e029b0a3a239bbd1bd19ebeca4f5aae2dd3a0f2e502cce6"
 }
