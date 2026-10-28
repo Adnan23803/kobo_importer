@@ -751,6 +751,142 @@ with tempfile.TemporaryDirectory() as dossier:
 
 
 # ==========================================================================
+# instanceID deduit du contenu : deduplication par le serveur
+# ==========================================================================
+section("instanceID deduit du contenu")
+
+ids = registry.content_instance_ids("aXYZ", ["a=1", "a=2", "a=1"])
+check("contenu identique, rang different : deux identifiants", ids[0] != ids[2], str(ids))
+check("format uuid: conserve", all(i.startswith("uuid:") for i in ids), str(ids))
+check("stable d'un appel a l'autre",
+      ids == registry.content_instance_ids("aXYZ", ["a=1", "a=2", "a=1"]))
+check("propre au formulaire",
+      ids[0] != registry.content_instance_ids("aAUTRE", ["a=1"])[0])
+
+xml_a, _ = xmlbuild.build_submission_xml([("nom", "Issa")], "aXYZ", "v1", "uuid:x")
+xml_b, _ = xmlbuild.build_submission_xml([("nom", "Issa")], "aXYZ", "v1", "uuid:x")
+check("XML identique d'un envoi a l'autre (formhub non aleatoire)", xml_a == xml_b)
+
+with tempfile.TemporaryDirectory() as dossier:
+    table = pd.DataFrame({
+        "nom": ["Issa", "Zara", "Issa"],
+        "age": [34.0, 29.0, 34.0],
+        "localisation/region": ["niamey", "niamey", "niamey"],
+        "colonne_inconnue": ["a", "b", "c"],
+    })
+    statuts = validation.map_columns(table.columns, forme)
+    conf = {
+        "dry_run": False, "resume_mode": "new", "max_workers": 2,
+        "output_dir": os.path.join(dossier, "echecs"),
+        "log_file": os.path.join(dossier, "journal.csv"),
+        "report_dir": os.path.join(dossier, "rapports"),
+    }
+
+    def envoyer(frame, source, chemin_base):
+        base = registry.Registry(chemin_base)
+        client = ClientSimule()
+        try:
+            engine_mod.ImportEngine(
+                conf, frame, forme, validation.map_columns(frame.columns, forme),
+                source, "menages.xlsx", client, base, stop_event=threading.Event(),
+            ).run()
+        finally:
+            base.close()
+        return sorted(client.envois)
+
+    premier = envoyer(table, "SIG1", os.path.join(dossier, "poste1.db"))
+    check("deux lignes identiques : deux instanceID",
+          len({ET.fromstring(p).findtext("meta/instanceID") for p in premier}) == 3)
+
+    # Autre poste (registre vierge), classeur reenregistre (autre empreinte),
+    # colonne de travail modifiee et colonnes reordonnees : le serveur doit
+    # recevoir exactement les memes octets, donc repondre 202.
+    retouche = table[["colonne_inconnue", "localisation/region", "age", "nom"]].copy()
+    retouche["colonne_inconnue"] = ["x", "y", "z"]
+    second = envoyer(retouche, "SIG2", os.path.join(dossier, "poste2.db"))
+    ids1 = sorted(ET.fromstring(p).findtext("meta/instanceID") for p in premier)
+    ids2 = sorted(ET.fromstring(p).findtext("meta/instanceID") for p in second)
+    check("autre poste, autre fichier : memes instanceID", ids1 == ids2, f"{ids1} / {ids2}")
+    check("autre poste, autre fichier : XML identique octet pour octet", premier == second)
+
+    corrige = table.copy()
+    corrige.loc[1, "age"] = 30.0
+    troisieme = envoyer(corrige, "SIG3", os.path.join(dossier, "poste3.db"))
+    ids3 = {ET.fromstring(p).findtext("meta/instanceID") for p in troisieme}
+    check("une valeur corrigee change l'identifiant de sa seule ligne",
+          len(ids3 - set(ids1)) == 1, str(ids3 - set(ids1)))
+
+
+# ==========================================================================
+# Libelles de choix convertis en noms
+# ==========================================================================
+section("Libelles de choix")
+
+FORME_LIBELLES = schema.parse_asset({
+    "uid": "aLIBELLES", "name": "Libelles", "has_deployment": True,
+    "deployment__active": True, "deployed_version_id": "v1",
+    "content": {
+        "translations": ["Francais (fr)", "Hausa (ha)"],
+        "survey": [
+            {"type": "select_one", "select_from_list_name": "src",
+             "name": "source", "label": ["Source", "Tushe"]},
+            {"type": "select_multiple", "select_from_list_name": "eq",
+             "name": "equipements", "label": ["Equipements", "Kayan aiki"]},
+            {"type": "select_one", "select_from_list_name": "amb",
+             "name": "ambigu", "label": ["Ambigu", "Ambigu"]},
+        ],
+        "choices": [
+            {"list_name": "src", "name": "puits", "label": ["Puits", "Rijiya"]},
+            {"list_name": "src", "name": "forage", "label": ["Forage", "Burtsatse"]},
+            {"list_name": "src", "name": "eau_courante", "label": ["Eau courante", "Ruwan famfo"]},
+            {"list_name": "eq", "name": "radio", "label": ["Radio", "Rediyo"]},
+            {"list_name": "eq", "name": "velo", "label": ["Vélo", "Keke"]},
+            {"list_name": "eq", "name": "eau_potable", "label": ["Eau potable", "Ruwan sha"]},
+            {"list_name": "amb", "name": "a", "label": ["Oui", "Oui"]},
+            {"list_name": "amb", "name": "b", "label": ["oui", "Eh"]},
+        ],
+    },
+})
+check("toutes les traductions conservees",
+      FORME_LIBELLES.get("source").choices[0].labels == ("Puits", "Rijiya"),
+      str(FORME_LIBELLES.get("source").choices[0].labels))
+
+tableau = pd.DataFrame({
+    "source": ["puits", "Forage", "Rijiya", "eau courante", "riviere", None],
+    "equipements": ["radio velo", "Radio, Vélo", "Eau potable", "Keke; Ruwan sha",
+                    "radio, inconnu", "Eau potable radio"],
+    "ambigu": ["a", "OUI", "Eh", "b", "a", "a"],
+})
+rapport = validation.validate_dataframe(tableau, FORME_LIBELLES)
+check("select_one : libelle, nom en majuscules et autre langue convertis",
+      list(tableau["source"][:4]) == ["puits", "forage", "puits", "eau_courante"],
+      str(list(tableau["source"])))
+check("select_one : valeur inconnue laissee telle quelle",
+      tableau["source"][4] == "riviere", str(tableau["source"][4]))
+check("select_multiple : libelles separes par virgule ou point-virgule",
+      list(tableau["equipements"][:4]) == ["radio velo", "radio velo", "eau_potable",
+                                           "velo eau_potable"],
+      str(list(tableau["equipements"])))
+check("select_multiple : un choix inconnu bloque toute la conversion",
+      tableau["equipements"][4] == "radio, inconnu", str(tableau["equipements"][4]))
+check("select_multiple : libelle a espaces melange par espaces non devine",
+      tableau["equipements"][5] == "Eau potable radio", str(tableau["equipements"][5]))
+check("libelle ambigu jamais converti", tableau["ambigu"][1] == "OUI", str(tableau["ambigu"][1]))
+check("libelle non ambigu converti", tableau["ambigu"][2] == "b", str(tableau["ambigu"][2]))
+check("conversions comptees par colonne",
+      rapport.converted_labels.get("source", (0,))[0] == 3
+      and rapport.converted_labels.get("equipements", (0,))[0] == 3,
+      str(rapport.converted_labels))
+check("conversion annoncee a l'utilisateur",
+      any("converties en noms de choix" in alerte for alerte in rapport.warnings),
+      str(rapport.warnings))
+fautes = {(issue.column, issue.value) for issue in rapport.row_issues}
+check("restent signales : inconnu et ambigu",
+      ("source", "riviere") in fautes and ("ambigu", "OUI") in fautes, str(fautes))
+check("plus signales : les libelles convertis", ("source", "Forage") not in fautes, str(fautes))
+
+
+# ==========================================================================
 section("Resultat")
 print(f"\n{len(PASSED)} verification(s) reussie(s), {len(FAILED)} echec(s).")
 for echec in FAILED:

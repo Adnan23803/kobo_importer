@@ -62,6 +62,8 @@ class ValidationReport:
     warnings: list = field(default_factory=list)
     invalid_row_mask: object = None
     issue_count: int = 0
+    # Libelles de choix convertis en noms : {colonne: (nombre, exemple)}.
+    converted_labels: dict = field(default_factory=dict)
 
     @property
     def mapped_columns(self):
@@ -395,6 +397,84 @@ def _select_multiple_errors(series, present, question):
     return present & flags.fillna(False).astype(bool)
 
 
+# --------------------------------------------------------------------------
+# Libelles de choix ecrits a la place des noms
+# --------------------------------------------------------------------------
+
+def choice_lookup(question):
+    """{forme reduite: nom du choix}, limite aux correspondances sans ambiguite.
+
+    Le nom lui-meme (pour « Niamey » au lieu de « niamey ») et chaque traduction
+    du libelle sont admis. Une forme qui designe deux choix differents est
+    ecartee : ce qui n'est pas compris avec certitude est laisse a l'utilisateur.
+    """
+    candidates = {}
+    for choice in question.choices:
+        forms = {choice.name, choice.label, *choice.labels}
+        for form in forms:
+            key = _reduce(form)
+            if key:
+                candidates.setdefault(key, set()).add(choice.name)
+    return {key: next(iter(names)) for key, names in candidates.items() if len(names) == 1}
+
+
+def _resolve_select_one(value, valid, lookup):
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or text in valid:
+        return None
+    return lookup.get(_reduce(text))
+
+
+def _resolve_select_multiple(value, valid, lookup):
+    import re
+    if not isinstance(value, str):
+        return None
+    formatted = xmlbuild.format_select_multiple(value)
+    if not formatted or all(token in valid for token in formatted.split(" ")):
+        return None
+    # Un libelle peut contenir des espaces (« Eau potable ») : on essaie la
+    # cellule entiere, puis un decoupage sur les seuls separateurs explicites,
+    # et l'espace en dernier recours.
+    whole = lookup.get(_reduce(value))
+    if whole:
+        return whole
+    for separators in (r"[,;\n]+", r"[,;\s]+"):
+        tokens = [token.strip() for token in re.split(separators, value) if token.strip()]
+        names = [token if token in valid else lookup.get(_reduce(token)) for token in tokens]
+        if tokens and all(names):
+            return " ".join(dict.fromkeys(names))
+    return None
+
+
+def _convert_choice_labels(dataframe, position, question):
+    """Remplace dans le tableau les libelles reconnus par le nom du choix.
+
+    Modifie `dataframe` en place, pour que l'envoi parte des valeurs converties.
+    Retourne (nombre de cellules converties, un exemple « avant -> apres »).
+    """
+    valid = question.choice_names
+    if not valid:
+        return 0, ""
+    lookup = choice_lookup(question)
+    resolve = _resolve_select_one if question.type == "select_one" else _resolve_select_multiple
+    series = dataframe.iloc[:, position]
+    replacements = {}
+    for row, value in enumerate(series.tolist()):
+        name = resolve(value, valid, lookup)
+        if name is not None and name != value:
+            replacements[row] = name
+    if not replacements:
+        return 0, ""
+    rows = list(replacements)
+    if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+        dataframe.isetitem(position, series.astype(object))
+    dataframe.iloc[rows, position] = [replacements[row] for row in rows]
+    first = rows[0]
+    return len(rows), f"« {series.iloc[first]} » -> {replacements[first]}"
+
+
 def _time_errors(series, present):
     def unparsable(value):
         return xmlbuild.format_time(value) is None
@@ -506,6 +586,10 @@ def validate_dataframe(dataframe, form_schema, max_issues=MAX_REPORTED_ISSUES, o
             continue
 
         question = status.question
+        if question.type in ("select_one", "select_multiple"):
+            count, example = _convert_choice_labels(dataframe, status.index, question)
+            if count:
+                report.converted_labels[status.column] = (count, example)
         series = dataframe.iloc[:, status.index]
         blank = _blank_mask(series)
         present = ~blank
@@ -564,6 +648,17 @@ def validate_dataframe(dataframe, form_schema, max_issues=MAX_REPORTED_ISSUES, o
             report, status, series, breaches,
             question.constraint.explain() if question.has_constraint else "",
             invalid, remaining,
+        )
+
+    if report.converted_labels:
+        total = sum(count for count, _ in report.converted_labels.values())
+        detail = " ; ".join(
+            f"{column} : {count} ({example})"
+            for column, (count, example) in list(report.converted_labels.items())[:4]
+        )
+        report.warnings.append(
+            f"{total} reponse(s) a choix ecrite(s) en toutes lettres ont ete "
+            f"converties en noms de choix — {detail}."
         )
 
     report.invalid_row_mask = invalid

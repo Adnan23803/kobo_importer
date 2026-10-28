@@ -7,6 +7,7 @@ Couvre les points retenus : 2 (diagnostic), 3 (correspondance manuelle),
 Lancement :  python tests/test_ameliorations.py
 """
 
+import hashlib
 import io
 import json
 import os
@@ -318,9 +319,9 @@ for candidat, reference, attendu in [
           updates.is_newer(candidat, reference) == attendu)
 
 check("manifeste simple",
-      updates._extract({"version": "3.2.0", "url": "u", "notes": "n"}) == ("3.2.0", "u", "n"))
+      updates._extract({"version": "3.2.0", "url": "u", "notes": "n"}) == ("3.2.0", "u", "n", ""))
 check("manifeste GitHub",
-      updates._extract({"tag_name": "v3.2.0", "html_url": "g", "body": "b"}) == ("v3.2.0", "g", "b"))
+      updates._extract({"tag_name": "v3.2.0", "html_url": "g", "body": "b"}) == ("v3.2.0", "g", "b", ""))
 
 # GitHub renvoie AUSSI une cle « url » qui pointe vers l'API : la retenir
 # donnerait a l'utilisateur un lien inexploitable au lieu de la page de
@@ -364,6 +365,28 @@ check("liste GitHub : brouillon ignore",
                         {"tag_name": "v3.3.0", "html_url": "h"}])[0] == "v3.3.0")
 check("preversion ignoree",
       updates._extract({"tag_name": "v4.0.0", "prerelease": True})[0] == "")
+
+# Empreinte de l'installeur : publiee par la construction automatique.
+_empreinte = "AB" * 32
+check("empreinte lue et normalisee en minuscules",
+      updates._extract({"version": "3.3.0", "sha256": _empreinte})[3] == _empreinte.lower())
+check("empreinte mal formee ignoree",
+      updates._extract({"version": "3.3.0", "sha256": "pas-une-empreinte"})[3] == "")
+with tempfile.TemporaryDirectory() as _dossier:
+    _fichier = os.path.join(_dossier, "KoboImporter_test.exe")
+    with open(_fichier, "wb") as _handle:
+        _handle.write(b"installeur de test")
+    _bonne = hashlib.sha256(b"installeur de test").hexdigest()
+    check("fichier conforme reconnu", updates.verify_download(_fichier, _bonne)[0])
+    check("empreinte publiee en majuscules acceptee",
+          updates.verify_download(_fichier, _bonne.upper())[0])
+    _faux, _motif = updates.verify_download(_fichier, "0" * 64)
+    check("fichier altere refuse", not _faux and "PAS" in _motif, _motif)
+    _sans, _motif = updates.verify_download(_fichier, "")
+    check("sans empreinte : jamais declare conforme",
+          not _sans and "impossible" in _motif, _motif)
+    _absent, _motif = updates.verify_download(os.path.join(_dossier, "absent.exe"), _bonne)
+    check("fichier absent : refus sans exception", not _absent and "illisible" in _motif, _motif)
 
 silencieux = updates.check_for_update("")
 check("desactive par defaut", not silencieux.available and not silencieux.error)

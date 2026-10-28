@@ -381,7 +381,12 @@ def build_submission_xml(pairs, root_name, form_version, instance_id=None,
     root.set("id", root_name)
 
     formhub = ET.SubElement(root, "formhub")
-    ET.SubElement(formhub, "uuid").text = formhub_uuid or uuid.uuid4().hex
+    # Deduit du formulaire, jamais tire au hasard : Kobo reconnait un doublon a
+    # l'empreinte du XML entier, et un seul element aleatoire suffirait a faire
+    # d'un renvoi une nouvelle soumission.
+    ET.SubElement(formhub, "uuid").text = (
+        formhub_uuid or uuid.uuid5(uuid.NAMESPACE_URL, f"kobo-importer:{root_name}").hex
+    )
 
     groups = {(): root}
     for path, text in pairs:

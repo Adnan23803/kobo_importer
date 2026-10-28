@@ -42,6 +42,9 @@ TEMPORAL_TYPES = {"date", "datetime", "time", "start", "end", "today"}
 class Choice:
     name: str
     label: str = ""
+    # Toutes les traductions du libelle : un fichier saisi dans la langue
+    # secondaire du formulaire doit etre reconnu aussi bien que dans la premiere.
+    labels: tuple = ()
 
     def display(self):
         return f"{self.name} - {self.label}" if self.label else self.name
@@ -280,6 +283,19 @@ def _first_label(value):
     return str(value).strip()
 
 
+def _all_labels(value):
+    """Toutes les traductions non vides d'un libelle, sans doublon."""
+    items = value if isinstance(value, list) else [value]
+    labels = []
+    for item in items:
+        if item in (None, False):
+            continue
+        text = str(item).strip()
+        if text and text not in labels:
+            labels.append(text)
+    return tuple(labels)
+
+
 def _row_name(row):
     for key in ("name", "$autoname", "$autovalue"):
         value = row.get(key)
@@ -308,7 +324,11 @@ def _parse_choices(content):
         name = _row_name(row)
         if not list_name or not name:
             continue
-        grouped.setdefault(list_name, []).append(Choice(name=name, label=_first_label(row.get("label"))))
+        grouped.setdefault(list_name, []).append(Choice(
+            name=name,
+            label=_first_label(row.get("label")),
+            labels=_all_labels(row.get("label")),
+        ))
     return grouped
 
 

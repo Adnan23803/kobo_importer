@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .. import config as config_mod
-from .. import diagnostics, paths, profiles, validation
+from .. import diagnostics, paths, profiles, updates, validation
 from . import theme
 from .widgets import Badge, Card
 
@@ -132,6 +132,15 @@ class UpdateDialog(_Dialog):
             text_color=theme.TEXT, hover_color=theme.NEUTRAL_BG, command=self.destroy,
         ).pack(side="right", padx=(8, 0))
 
+        if info.sha256:
+            ctk.CTkButton(
+                pied, text="Verifier le fichier", width=140, height=40,
+                corner_radius=theme.RADIUS,
+                fg_color="transparent", border_width=1, border_color=theme.CARD_BORDER,
+                text_color=theme.TEXT, hover_color=theme.NEUTRAL_BG,
+                command=self.verifier,
+            ).pack(side="right", padx=(8, 0))
+
         if info.url:
             ctk.CTkButton(
                 pied, text="Copier le lien", width=140, height=40,
@@ -178,6 +187,23 @@ class UpdateDialog(_Dialog):
                 text="Navigateur indisponible : le lien a ete copie.",
                 text_color=theme.WARNING,
             )
+
+    def verifier(self):
+        """Compare un installeur telecharge a l'empreinte publiee."""
+        dossier = os.path.join(os.path.expanduser("~"), "Downloads")
+        chemin = filedialog.askopenfilename(
+            parent=self,
+            title="Choisir l'installeur telecharge",
+            initialdir=dossier if os.path.isdir(dossier) else None,
+            filetypes=[("Installeur", "*.exe"), ("Tous les fichiers", "*.*")],
+        )
+        if not chemin:
+            return
+        conforme, message = updates.verify_download(chemin, self.info.sha256)
+        if conforme:
+            messagebox.showinfo(APP_TITLE, message, parent=self)
+        else:
+            messagebox.showerror(APP_TITLE, message, parent=self)
 
     def _appliquer_choix(self):
         version = self.info.latest if self.ignorer.get() else ""

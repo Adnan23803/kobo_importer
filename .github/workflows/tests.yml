@@ -1,0 +1,41 @@
+# Execute les suites de tests a chaque envoi et a chaque demande de fusion.
+# Windows, et non Linux : l'application vise Windows (DPAPI, chemins,
+# interface Tk), et le test d'interface doit tourner dans les memes conditions.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Dependances
+        run: python -m pip install -r requirements.txt
+
+      - name: Coherence des numeros de version
+        run: python tests/test_versions.py
+
+      - name: Noyau
+        run: python tests/test_koboimp.py
+
+      - name: Ameliorations
+        run: python tests/test_ameliorations.py
+
+      - name: Groupes repetes
+        run: python tests/test_repetitions.py
+
+      - name: Interface
+        run: python tests/smoke_ui.py

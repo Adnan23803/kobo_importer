@@ -325,6 +325,8 @@ def command_update(args, reporter):
     reporter.write(info.headline())
     if info.available and info.url:
         reporter.write(f"Telechargement : {info.url}")
+    if info.available and info.sha256:
+        reporter.write(f"Empreinte SHA-256 de l'installeur : {info.sha256}")
     return EXIT_OK
 
 

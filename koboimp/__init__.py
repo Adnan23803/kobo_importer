@@ -1,5 +1,5 @@
 """Kobo Importer - import de fichiers Excel vers KoboToolbox."""
 
-__version__ = "3.2.3"
+__version__ = "3.3.0"
 __app_name__ = "Kobo Importer"
 __author__ = "Adnan Adamou"

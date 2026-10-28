@@ -187,6 +187,11 @@ class ImportEngine:
         mapped = [status for status in column_statuses if status.is_mapped]
         if not mapped:
             raise ValueError("Aucune colonne du fichier ne correspond au formulaire.")
+        # Ordre du formulaire, pas celui du classeur : deplacer une colonne ne
+        # doit pas changer le XML, sans quoi Kobo ne reconnaitrait plus un
+        # renvoi comme doublon.
+        order = {question.path: rank for rank, question in enumerate(form_schema.questions)}
+        mapped.sort(key=lambda status: order.get(status.path, len(order)))
         self._columns = [status.column for status in mapped]
         self._paths = [status.path for status in mapped]
         self._types = {status.path: status.question.type for status in mapped}
@@ -213,12 +218,35 @@ class ImportEngine:
                 {status.path: status.question.type for status in data.mapped_columns}
             )
 
+        fingerprints = self._repeat_fingerprints()
         self.row_keys = registry_mod.compute_row_keys(
-            dataframe, source_id, extra=self._repeat_fingerprints()
+            dataframe, source_id, extra=fingerprints
+        )
+        self.instance_ids = registry_mod.content_instance_ids(
+            self.schema.uid, self._sent_contents(fingerprints)
         )
         self.states = {}
         self._last_progress = 0.0
         self._started = time.monotonic()
+
+    def _sent_contents(self, fingerprints):
+        """Chaine canonique de ce que chaque ligne enverra, pour son instanceID.
+
+        Seules les colonnes reconnues comptent, mises en forme comme dans le
+        XML : une colonne de travail modifiee, un ordre de colonnes different
+        ou un 1 relu en 1.0 ne changent pas l'identite de la soumission.
+        """
+        contents = []
+        for position, raw in enumerate(self._values):
+            try:
+                pairs = xmlbuild.row_to_pairs(dict(zip(self._paths, raw)), self._types)
+            except Exception:  # noqa: BLE001 - la ligne sera refusee plus loin
+                pairs = [(path, str(value)) for path, value in zip(self._paths, raw)]
+            content = "\x1f".join(f"{path}={text}" for path, text in sorted(pairs))
+            if position < len(fingerprints):
+                content += "\x1d" + fingerprints[position]
+            contents.append(content)
+        return contents
 
     def _repeat_fingerprints(self):
         """Empreinte des repetitions de chaque ligne principale.
@@ -290,7 +318,8 @@ class ImportEngine:
         self._check_form_unchanged()
 
         self.states = self.registry.register_rows(
-            self.source_id, self.source_name, self.schema.uid, self.row_keys
+            self.source_id, self.source_name, self.schema.uid, self.row_keys,
+            instance_ids=self.instance_ids,
         )
         selected, skipped = registry_mod.select_rows_to_send(
             self.states, self.row_keys, config.get("resume_mode", "new")

@@ -1,4 +1,4 @@
-# Kobo Importer 3.2
+# Kobo Importer 3.3
 
 Application Windows qui importe un fichier **Excel ou CSV** dans un formulaire KoboToolbox.
 
@@ -24,6 +24,7 @@ dans un classeur corrigeable et reimportable tel quel.
 - [Profils de configuration](#profils-de-configuration)
 - [Ligne de commande](#ligne-de-commande)
 - [Publier une mise a jour](#publier-une-mise-a-jour)
+- [Ce qui a change en version 3.3](#ce-qui-a-change-en-version-33)
 - [Ce qui a change en version 3.2](#ce-qui-a-change-en-version-32)
 - [Ce qui a change en version 3.1](#ce-qui-a-change-en-version-31)
 - [Ce qui a change en version 3.0](#ce-qui-a-change-en-version-30)
@@ -71,7 +72,7 @@ directement.
 |---|---|
 | Nouvelles lignes seulement | ne renvoie jamais ce qui est deja arrive (defaut) |
 | Reprendre les echecs | ne retente que les lignes tombees en erreur |
-| Tout renvoyer | ignore l'historique — cree des doublons si les lignes sont deja sur le serveur |
+| Tout renvoyer | ignore l'historique local ; une ligne deja recue est reconnue par le serveur (voir [Reprise et doublons](#reprise-et-doublons)) |
 
 La case **Simulation** genere les fichiers XML sans rien envoyer : utile pour
 verifier le resultat avant de toucher au serveur.
@@ -144,8 +145,8 @@ Formats attendus par type de question :
 | `date` | `2026-03-04`, ou une vraie date Excel |
 | `datetime` | date et heure ; le fuseau est ajoute automatiquement |
 | `time` | `14:30:00` |
-| `select_one` | le **nom** du choix, pas son libelle |
-| `select_multiple` | plusieurs choix separes par une virgule, un point-virgule ou un espace |
+| `select_one` | le **nom** du choix ; son libelle est converti s'il est sans ambiguite |
+| `select_multiple` | plusieurs choix separes par une virgule, un point-virgule ou un espace (noms ou libelles) |
 | `geopoint` | `13.51, 2.11` ou `13.51 2.11` |
 
 Les listes de choix acceptees figurent dans la feuille « Notice » du modele, et
@@ -168,12 +169,30 @@ une empreinte de son contenu. Consequences pratiques :
 - une coupure reseau pendant un envoi ne fait pas de doublon : la ligne conserve
   son identifiant de soumission, et le serveur reconnait le renvoi (reponse 202).
 
+**Le serveur est le second rempart.** L'identifiant de soumission (`instanceID`)
+est deduit des donnees envoyees et du formulaire, jamais tire au hasard, et le
+XML est construit a l'identique d'un envoi a l'autre (questions dans l'ordre du
+formulaire). Une ligne deja recue est donc reconnue par Kobo meme quand le
+registre local ne sait plus :
+
+- registre efface, poste reinstalle, ou **meme fichier importe depuis un autre poste** ;
+- classeur **reenregistre dans Excel** (son empreinte change, donc le registre
+  le prend pour un nouveau fichier) ;
+- colonnes deplacees ou colonnes de travail modifiees ;
+- mode « Tout renvoyer ».
+
+Dans tous ces cas la ligne repart, le serveur repond 202, et elle est comptee
+comme doublon ignore. Deux limites : un **redeploiement du formulaire** (nouvelle
+version, donc XML different) et les lignes **envoyees par la version 3.2.3 ou anterieure**,
+dont l'identifiant etait aleatoire.
+
 Le meme fichier envoye vers **deux formulaires differents** compte bien comme deux
 imports distincts.
 
 Pour repartir de zero sur un fichier : **Parametres avances → Oublier l'historique
-du fichier courant**. A n'utiliser qu'en connaissance de cause — les lignes deja
-presentes sur le serveur seront recreees.
+du fichier courant**. Les lignes envoyees par une version posterieure a 3.2.3
+sont alors reconnues par le serveur et ne sont pas recreees ; celles envoyees
+par la 3.2.3 ou une version anterieure le seraient.
 
 ---
 
@@ -542,35 +561,49 @@ lance quelques fois par semaine.
 
 ### A chaque nouvelle version
 
-1. **Numero de version**, aux quatre endroits :
+La construction et la publication sont automatiques
+([`.github/workflows/publication.yml`](.github/workflows/publication.yml)).
+
+1. **Numero de version**, aux trois endroits (`tests/test_versions.py` refuse
+   toute incoherence) :
 
    | Fichier | Ligne |
    |---|---|
-   | `koboimp/__init__.py` | `__version__ = "3.2.0"` |
+   | `koboimp/__init__.py` | `__version__ = "3.3.0"` |
    | `version_info.txt` | `filevers`, `prodvers`, `FileVersion`, `ProductVersion` |
-   | `installer.iss` | `#define MaVersion "3.2.0"` |
-   | `derniere_version.json` | `"version": "3.2.0"` (si vous utilisez cette source) |
+   | `installer.iss` | `#define MaVersion "3.3.0"` |
 
-2. `build_exe.bat` — les trois suites de tests doivent passer, sans quoi la
-   construction s'arrete.
+2. **Nouveautes** : redigez le champ `notes` de `derniere_version.json`. Ne
+   touchez ni `version`, ni `url`, ni `sha256` : la publication s'en charge.
 
-3. Compilez `installer.iss` dans Inno Setup.
-
-4. Publiez sur GitHub :
+3. Poussez, puis posez l'etiquette :
 
    ```bash
-   git tag v3.2.0 && git push --tags
-   gh release create v3.2.0 "installeur/KoboImporter_3.2.0_installation.exe" \
-      --title "Kobo Importer 3.2.0" \
-      --notes "Ce qui change dans cette version."
+   git push
+   git tag v3.3.0 && git push origin v3.3.0
    ```
 
-   Le fichier joint doit etre **l'installeur**, pas le dossier `dist`.
+GitHub Actions execute alors les tests, construit l'executable et l'installeur,
+publie la release avec l'installeur et son empreinte SHA-256, puis met a jour
+`derniere_version.json` sur `main`. Le manifeste n'est modifie qu'en dernier :
+aucun poste ne se voit annoncer une version encore introuvable. Si une etape
+echoue, rien n'est publie et le manifeste reste sur la version precedente.
 
-5. Si vous utilisez le manifeste plutot que l'API GitHub, mettez a jour
-   `derniere_version.json` et poussez-le.
+Au prochain lancement, les postes deja equipes afficheront l'annonce. La
+fenetre de mise a jour propose **Verifier le fichier** : l'utilisateur designe
+l'installeur telecharge, et l'application le compare a l'empreinte publiee
+(telechargement tronque, fichier remplace). Sans l'application :
 
-Au prochain lancement, les postes deja equipes afficheront l'annonce.
+```bash
+certutil -hashfile KoboImporter_3.3.0_installation.exe SHA256
+```
+
+Chaque envoi sur `main` et chaque demande de fusion executent aussi les tests
+([`.github/workflows/tests.yml`](.github/workflows/tests.yml)).
+
+**Construction manuelle**, si besoin : `build_exe.bat`, puis compilez
+`installer.iss` dans Inno Setup. Renseignez alors vous-meme `version`, `url`
+et `sha256` dans le manifeste.
 
 ### L'installation par-dessus l'ancienne version
 
@@ -608,6 +641,34 @@ lendemain. Dans ce cas de figure :
 2. les postes l'annoncent a leur prochain lancement ;
 3. pour les utilisateurs qui n'ont pas encore installe, `--diagnostic` nomme
    precisement la panne, ce qui evite l'incomprehension et les appels.
+
+---
+
+## Ce qui a change en version 3.3
+
+### Le serveur reconnait les doublons, meme sans registre local
+
+L'identifiant de soumission (`instanceID`) est desormais deduit des donnees
+envoyees et du formulaire, et le XML est construit a l'identique d'un envoi a
+l'autre (questions dans l'ordre du formulaire, `formhub/uuid` fixe). Une ligne
+deja recue est reconnue par Kobo (reponse 202) meme apres effacement du
+registre, import depuis un autre poste, classeur reenregistre dans Excel ou mode
+« Tout renvoyer ». Voir [Reprise et doublons](#reprise-et-doublons) pour les
+limites.
+
+### Libelles de choix acceptes
+
+Une reponse `select_one` ou `select_multiple` ecrite en toutes lettres
+(« Eau potable » au lieu de `eau_potable`) est convertie en nom de choix, dans
+n'importe quelle langue du formulaire, des lors que la correspondance est sans
+ambiguite. La verification indique combien de cellules ont ete converties.
+
+### Mises a jour verifiables
+
+La construction et la publication sont automatisees par GitHub Actions. Le
+manifeste de version porte l'empreinte SHA-256 de l'installeur, et la fenetre
+de mise a jour propose **Verifier le fichier** pour s'assurer qu'un installeur
+telecharge est bien celui qui a ete publie.
 
 ---
 
@@ -777,8 +838,11 @@ Vingt-sept corrections et ameliorations, regroupees par nature.
   sont verifiees hors ligne. Celles qui dependent d'une autre reponse, de la
   date du jour ou d'une fonction non reconnue restent controlees par le serveur.
 - **Libelles de choix** : une question a choix attend le *nom* technique de
-  l'option (`niamey`), pas son libelle (`Niamey`). Le modele Excel genere
-  fournit les listes deroulantes correspondantes.
+  l'option (`niamey`). Un libelle (`Niamey`), dans n'importe quelle langue du
+  formulaire et sans tenir compte des majuscules ni des accents, est converti
+  automatiquement et la conversion est annoncee a la verification. Il reste
+  signale, sans etre converti, quand il designe plusieurs choix ou, pour un
+  choix multiple, quand un seul des choix de la cellule n'est pas reconnu.
 - **Verification de mise a jour** : inactive tant qu'aucune adresse de manifeste
   n'est renseignee dans les parametres avances. Aucune requete n'est alors emise.
 

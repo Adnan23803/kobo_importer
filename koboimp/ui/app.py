@@ -437,8 +437,9 @@ class AdvancedDialog(ctk.CTkToplevel):
         if not messagebox.askyesno(
             APP_TITLE,
             "Oublier l'historique de ce fichier ?\n\nToutes ses lignes seront considerees "
-            "comme jamais envoyees. Un nouvel import creera des doublons sur le serveur "
-            "si elles y sont deja.",
+            "comme jamais envoyees. Le serveur reconnaitra celles qu'il a deja recues, "
+            "sauf si elles ont ete envoyees par une version 3.2.3 ou anterieure, ou "
+            "avant un redeploiement du formulaire : celles-la seraient recreees.",
         ):
             return
         removed = self.session.registry.forget_source(self.session.source_id)

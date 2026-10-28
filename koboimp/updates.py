@@ -13,13 +13,15 @@ Deux formats de manifeste sont acceptes :
 
   format simple           {"version": "3.1.0",
                            "url": "https://.../KoboImporter_3.1.0.exe",
-                           "notes": "Correction de ..."}
+                           "notes": "Correction de ...",
+                           "sha256": "9f2c...e41a"}       (facultatif)
 
   API GitHub Releases     {"tag_name": "v3.1.0",
                            "html_url": "https://github.com/.../releases/...",
                            "body": "...", "prerelease": false, "draft": false}
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 
@@ -52,6 +54,7 @@ CHECK_TIMEOUT = 10
 DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/Adnan23803/kobo_importer/main/derniere_version.json"
 
 _VERSION_PART = re.compile(r"\d+")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def resolve_url(config):
@@ -71,6 +74,10 @@ class UpdateInfo:
     url: str = ""
     notes: str = ""
     error: str = ""
+    # Empreinte de l'installeur, ecrite dans le manifeste par la construction
+    # automatique : elle permet de verifier qu'un fichier telecharge est bien
+    # celui qui a ete publie, et non une copie alteree ou incomplete.
+    sha256: str = ""
 
     def headline(self):
         if self.error:
@@ -106,7 +113,7 @@ def is_newer(candidate, reference=__version__):
 
 
 def _extract(payload):
-    """Retourne (version, url, notes) quel que soit le format du manifeste."""
+    """Retourne (version, url, notes, sha256) quel que soit le format du manifeste."""
     if isinstance(payload, list):
         # API GitHub : /releases renvoie une liste, la plus recente en tete.
         payload = next(
@@ -115,10 +122,10 @@ def _extract(payload):
             payload[0] if payload else {},
         )
     if not isinstance(payload, dict):
-        return "", "", ""
+        return "", "", "", ""
 
     if payload.get("draft") or payload.get("prerelease"):
-        return "", "", ""
+        return "", "", "", ""
 
     version = str(payload.get("version") or payload.get("tag_name") or "").strip()
 
@@ -128,7 +135,13 @@ def _extract(payload):
     url = str(payload.get("html_url") or payload.get("url") or "").strip()
 
     notes = str(payload.get("notes") or payload.get("body") or "").strip()
-    return version, url, notes
+
+    # Une empreinte mal formee est ignoree plutot que de faire echouer a tort
+    # la verification d'un fichier authentique.
+    sha256 = str(payload.get("sha256") or "").strip().lower()
+    if not _SHA256.match(sha256):
+        sha256 = ""
+    return version, url, notes, sha256
 
 
 def check_for_update(update_url, current=__version__, timeout=CHECK_TIMEOUT):
@@ -161,7 +174,7 @@ def check_for_update(update_url, current=__version__, timeout=CHECK_TIMEOUT):
     except ValueError:
         return UpdateInfo(current=current, error="reponse illisible (JSON attendu)")
 
-    version, url, notes = _extract(payload)
+    version, url, notes, sha256 = _extract(payload)
     if not version:
         return UpdateInfo(current=current, error="manifeste sans numero de version")
 
@@ -171,4 +184,35 @@ def check_for_update(update_url, current=__version__, timeout=CHECK_TIMEOUT):
         latest=version,
         url=url,
         notes=notes[:2000],
+        sha256=sha256,
+    )
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_download(path, expected):
+    """(conforme, message) pour un installeur telecharge.
+
+    `expected` vient du manifeste. Sans empreinte publiee, aucune conclusion
+    n'est possible : on le dit, plutot que de declarer le fichier conforme.
+    """
+    expected = str(expected or "").strip().lower()
+    if not _SHA256.match(expected):
+        return False, "Aucune empreinte publiee pour cette version : verification impossible."
+    try:
+        actual = file_sha256(path)
+    except OSError as exc:
+        return False, f"Fichier illisible : {exc.strerror or exc}"
+    if actual == expected:
+        return True, "Fichier authentique : il correspond exactement a la version publiee."
+    return False, (
+        "Ce fichier ne correspond PAS a la version publiee (telechargement "
+        "incomplet ou fichier modifie). Ne l'installez pas : telechargez-le a "
+        "nouveau depuis la page officielle."
     )

@@ -498,6 +498,40 @@ try:
     app.update()
     check("mise a jour : manifeste sans lien supporte",
           bool(fenetre_nue.winfo_exists()) and fenetre_nue.lien is None)
+
+    # Verification de l'installeur : le selecteur de fichier est simule.
+    import hashlib  # noqa: E402
+    import tempfile as tempfile_mod  # noqa: E402
+    with tempfile_mod.TemporaryDirectory() as dossier_maj:
+        installeur = os.path.join(dossier_maj, "KoboImporter_9.9.9_installation.exe")
+        with open(installeur, "wb") as handle:
+            handle.write(b"contenu publie")
+        signe = updates_mod.UpdateInfo(
+            available=True, current="3.0.0", latest="9.9.9", url="https://exemple.test",
+            sha256=hashlib.sha256(b"contenu publie").hexdigest(),
+        )
+        fenetre_sig = dialogs_mod.UpdateDialog(app, signe)
+        app.update()
+        annonces = []
+        origines = (dialogs_mod.filedialog.askopenfilename,
+                    dialogs_mod.messagebox.showinfo, dialogs_mod.messagebox.showerror)
+        dialogs_mod.filedialog.askopenfilename = lambda **_k: installeur
+        dialogs_mod.messagebox.showinfo = lambda _t, m, **_k: annonces.append(("ok", m))
+        dialogs_mod.messagebox.showerror = lambda _t, m, **_k: annonces.append(("ko", m))
+        try:
+            fenetre_sig.verifier()
+            with open(installeur, "ab") as handle:
+                handle.write(b"!")
+            fenetre_sig.verifier()
+        finally:
+            (dialogs_mod.filedialog.askopenfilename,
+             dialogs_mod.messagebox.showinfo, dialogs_mod.messagebox.showerror) = origines
+        check("mise a jour : installeur authentique confirme",
+              len(annonces) == 2 and annonces[0][0] == "ok", str(annonces))
+        check("mise a jour : installeur altere signale",
+              len(annonces) == 2 and annonces[1][0] == "ko", str(annonces))
+        fenetre_sig.destroy()
+        app.update()
     fenetre_nue.destroy()
     app.update()
 except Exception as exc:  # noqa: BLE001

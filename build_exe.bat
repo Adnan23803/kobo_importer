@@ -18,6 +18,7 @@ echo [1/4] Installation des dependances...
 %PY% -m pip install -r requirements-dev.txt || goto :erreur
 
 echo [2/4] Verification du noyau, des ameliorations et de l'interface...
+%PY% tests\test_versions.py || goto :erreur
 %PY% tests\test_koboimp.py || goto :erreur
 %PY% tests\test_ameliorations.py || goto :erreur
 %PY% tests\test_repetitions.py || goto :erreur

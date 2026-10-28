@@ -110,6 +110,35 @@ def compute_row_keys(dataframe, source_id, extra=None):
     return keys
 
 
+# Espace de noms des instanceID deduits du contenu. Ne jamais le modifier : les
+# identifiants deja envoyes cesseraient d'etre reconnus par le serveur.
+INSTANCE_NAMESPACE = uuid.UUID("6f1c2a5e-8d4b-5b7a-9c3e-2f0d4a6b8e91")
+
+
+def content_instance_ids(form_uid, contents):
+    """instanceID deduit de ce qui est envoye, et non du fichier ou du poste.
+
+    `contents` donne, pour chaque ligne, une chaine canonique de ses donnees.
+    Le registre local suffit tant qu'il existe ; ces identifiants prennent le
+    relais quand il ne sait plus : base effacee, autre poste, classeur
+    reenregistre dans Excel (son empreinte change, donc toutes ses cles), ou
+    mode « Tout renvoyer ». La meme ligne porte alors le meme instanceID et un
+    XML identique, que Kobo reconnait comme doublon (202) au lieu de le creer
+    une seconde fois.
+
+    Deux lignes identiques dans un fichier restent deux soumissions : le rang
+    d'occurrence entre dans l'empreinte, comme pour les cles de ligne.
+    """
+    occurrences = {}
+    ids = []
+    for content in contents:
+        rank = occurrences.get(content, 0)
+        occurrences[content] = rank + 1
+        name = f"{form_uid}\x1e{rank}\x1e{content}"
+        ids.append(f"uuid:{uuid.uuid5(INSTANCE_NAMESPACE, name)}")
+    return ids
+
+
 class Registry:
     """Acces au registre. Sur, mais concu pour etre appele depuis un seul thread
     coordinateur ; un verrou protege malgre tout les acces concurrents."""
@@ -144,14 +173,18 @@ class Registry:
 
     # -- enregistrement des lignes ----------------------------------------
 
-    def register_rows(self, source_id, source_name, form_uid, row_keys):
+    def register_rows(self, source_id, source_name, form_uid, row_keys, instance_ids=None):
         """Cree les lignes absentes et retourne {row_key: (instance_id, statut)}.
 
-        Une seule transaction, meme pour 50 000 lignes.
+        `instance_ids`, aligne sur `row_keys`, fixe l'identifiant des lignes
+        nouvelles ; une ligne deja connue garde le sien. Absent, un identifiant
+        aleatoire est tire. Une seule transaction, meme pour 50 000 lignes.
         """
         stamp = _now()
+        ids = list(instance_ids) if instance_ids is not None else None
         payload = [
-            (key, source_id, source_name, form_uid, index, f"uuid:{uuid.uuid4()}",
+            (key, source_id, source_name, form_uid, index,
+             ids[index] if ids else f"uuid:{uuid.uuid4()}",
              PENDING, None, None, stamp, stamp)
             for index, key in enumerate(row_keys)
         ]
